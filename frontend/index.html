@@ -849,30 +849,10 @@
         // Failed papers retry
         async function loadFailedPapers() {
             try {
-                // Get all AI screening results, find papers with failed status
-                const data = await apiJSON('/api/ai-screening/results?page_size=200');
-                const failedPaperIds = new Map();
-
-                // We need to query for failed papers specifically
-                // Use the queue endpoint with a custom approach
-                const allData = await apiJSON('/api/ai-screening/results?page_size=1000');
-
-                // Actually, let's get failed papers from a dedicated query
-                // For now, check each paper's status via the paper endpoint
                 const tbody = document.querySelector('#aiFailedTable tbody');
+                tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
 
-                // Get papers that have failed AI screening
-                // We'll use the screening queue approach: get all papers, check which have failed
-                const failedResponse = await fetch(API + '/api/ai-screening/failed-papers?page_size=100', {
-                    headers: { 'Content-Type': 'application/json' }
-                });
-
-                if (!failedResponse.ok) {
-                    tbody.innerHTML = '<tr><td colspan="5">No failed papers found.</td></tr>';
-                    return;
-                }
-
-                const failedData = await failedResponse.json();
+                const failedData = await apiJSON('/api/ai-screening/failed-papers?page_size=100');
 
                 if (!failedData.papers || failedData.papers.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="5">No failed papers. All screened papers succeeded.</td></tr>';
@@ -890,7 +870,7 @@
                 `).join('');
             } catch(e) {
                 console.error('Failed to load failed papers:', e);
-                document.querySelector('#aiFailedTable tbody').innerHTML = '<tr><td colspan="5">No failed papers found.</td></tr>';
+                document.querySelector('#aiFailedTable tbody').innerHTML = '<tr><td colspan="5">Error loading failed papers: ' + e.message + '</td></tr>';
             }
         }
 
