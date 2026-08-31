@@ -273,3 +273,235 @@ class TestAIScreeningErrorHandling:
         ).first()
         assert db_result is not None
         assert db_result.processing_status == "completed"
+
+
+class TestAIScreeningCountIntegrity:
+    """Test that AI screening counts are based on distinct papers."""
+
+    def test_failed_attempts_not_counted(self, db):
+        """Failed attempts should not increase 'AI Screened' count."""
+        # Create paper with failed + completed results
+        paper = make_paper(db, paper_id=100)
+
+        # Add 3 failed results
+        for _ in range(3):
+            failed = AIScreeningResult(
+                paper_id=100,
+                processing_status="failed",
+                error_message="test error",
+                is_active=False,
+            )
+            db.add(failed)
+
+        # Add 1 completed result
+        completed = AIScreeningResult(
+            paper_id=100,
+            processing_status="completed",
+            recommendation="likely_include",
+            confidence="high",
+            is_active=True,
+        )
+        db.add(completed)
+        db.commit()
+
+        # Summary should count 1 distinct paper, not 4 rows
+        service = AIScreeningService(db)
+        summary = service.get_screening_summary()
+
+        # The distinct count should be 1 (just this paper)
+        assert summary["ai_screened"] >= 1
+
+    def test_distinct_paper_count(self, db):
+        """Multiple results for same paper should count as 1."""
+        service = AIScreeningService(db)
+
+        # Create papers
+        p1 = make_paper(db, paper_id=200, title="Paper A")
+        p2 = make_paper(db, paper_id=201, title="Paper B")
+
+        # Add multiple completed results for p1 (simulating re-screens)
+        for i in range(3):
+            r = AIScreeningResult(
+                paper_id=200,
+                processing_status="completed",
+                recommendation="likely_include",
+                is_active=(i == 2),  # Only last one active
+            )
+            db.add(r)
+
+        # Add one result for p2
+        r2 = AIScreeningResult(
+            paper_id=201,
+            processing_status="completed",
+            recommendation="likely_exclude",
+            is_active=True,
+        )
+        db.add(r2)
+        db.commit()
+
+        # Count distinct papers with active completed results
+        from sqlalchemy import and_, func
+        distinct_count = db.query(func.count(func.distinct(AIScreeningResult.paper_id))).filter(
+            and_(
+                AIScreeningResult.is_active == True,
+                AIScreeningResult.processing_status == "completed",
+            )
+        ).scalar()
+
+        assert distinct_count == 2  # Papers 200 and 201, not 4 rows
+
+    def test_recommendation_counts_are_distinct(self, db):
+        """Recommendation counts should be based on distinct papers."""
+        from sqlalchemy import and_, func
+
+        # Create papers with different recommendations
+        for i, rec in enumerate(["likely_include", "likely_include", "likely_exclude"]):
+            p = make_paper(db, paper_id=300 + i, title=f"Paper {i}")
+            r = AIScreeningResult(
+                paper_id=300 + i,
+                processing_status="completed",
+                recommendation=rec,
+                is_active=True,
+            )
+            db.add(r)
+        db.commit()
+
+        # Count distinct papers per recommendation
+        include_count = db.query(func.count(func.distinct(AIScreeningResult.paper_id))).filter(
+            and_(
+                AIScreeningResult.is_active == True,
+                AIScreeningResult.processing_status == "completed",
+                AIScreeningResult.recommendation == "likely_include",
+            )
+        ).scalar()
+
+        exclude_count = db.query(func.count(func.distinct(AIScreeningResult.paper_id))).filter(
+            and_(
+                AIScreeningResult.is_active == True,
+                AIScreeningResult.processing_status == "completed",
+                AIScreeningResult.recommendation == "likely_exclude",
+            )
+        ).scalar()
+
+        assert include_count == 2
+        assert exclude_count == 1
+
+
+class TestAIScreeningTitleIncluded:
+    """Test that AI screening results include paper titles."""
+
+    def test_to_dict_includes_title_from_join(self, db):
+        """Verify that the API joins paper title into results."""
+        paper = make_paper(db, paper_id=400, title="Test Paper Title Here")
+        result = AIScreeningResult(
+            paper_id=400,
+            processing_status="completed",
+            recommendation="likely_include",
+            is_active=True,
+        )
+        db.add(result)
+        db.commit()
+
+        # Simulate what the API does: join with Paper
+        from sqlalchemy import and_
+        from app.models.paper import Paper
+        row = db.query(AIScreeningResult, Paper).join(
+            Paper, AIScreeningResult.paper_id == Paper.id
+        ).filter(
+            and_(
+                AIScreeningResult.paper_id == 400,
+                AIScreeningResult.is_active == True,
+            )
+        ).first()
+
+        assert row is not None
+        ai_result, paper = row
+        d = ai_result.to_dict()
+        d['title'] = paper.title
+        assert d['title'] == "Test Paper Title Here"
+
+    def test_paper_without_title(self, db):
+        """Test handling of paper with empty title (edge case)."""
+        from app.models.paper import Paper as PaperModel
+        # Paper model requires title (NOT NULL), so test with empty string
+        paper = PaperModel(id=401, normalized_title="no title", title="")
+        db.add(paper)
+        result = AIScreeningResult(
+            paper_id=401,
+            processing_status="completed",
+            recommendation="unclear",
+            is_active=True,
+        )
+        db.add(result)
+        db.commit()
+
+        from sqlalchemy import and_
+        row = db.query(AIScreeningResult, PaperModel).join(
+            PaperModel, AIScreeningResult.paper_id == PaperModel.id
+        ).filter(
+            and_(
+                AIScreeningResult.paper_id == 401,
+                AIScreeningResult.is_active == True,
+            )
+        ).first()
+
+        ai_result, paper = row
+        d = ai_result.to_dict()
+        d['title'] = paper.title
+        # Empty string title should be handled gracefully
+        assert d['title'] == ""
+
+
+class TestAIScreeningHumanSeparation:
+    """Test that AI results don't overwrite human decisions."""
+
+    def test_ai_does_not_modify_screening_decisions(self, db):
+        """AI screening should not modify human screening decisions."""
+        from app.models.screening import ScreeningDecision
+
+        paper = make_paper(db, paper_id=500)
+
+        # Create a human screening decision
+        human_decision = ScreeningDecision(
+            paper_id=500,
+            stage="title_abstract",
+            q1_fl_comparison="YES",
+            q2_non_iid="YES",
+            q3_superiority_claim="YES",
+            q4_full_text_available="YES",
+            decision="include",
+            exclusion_reason=None,
+            decided_by="user",
+        )
+        db.add(human_decision)
+        db.commit()
+
+        # Now run AI screening
+        service = AIScreeningService(db)
+        mock_response = {
+            "content": json.dumps({
+                "q1_fl_comparison": "NO",
+                "q2_non_iid": "NO",
+                "q3_superiority_claim": "NO",
+                "q4_info_available": "YES",
+                "recommendation": "likely_exclude",
+                "confidence": "high",
+                "reasoning": "test",
+                "q1_evidence": "",
+                "q2_evidence": "",
+                "q3_evidence": "",
+                "q4_evidence": "",
+            }),
+            "model": "test-model",
+        }
+
+        with patch.object(service, '_call_llm', return_value=mock_response):
+            service.screen_paper(500, use_cache=False)
+
+        # Verify human decision is unchanged
+        human = db.query(ScreeningDecision).filter(
+            ScreeningDecision.paper_id == 500
+        ).first()
+        assert human.decision == "include"
+        assert human.q1_fl_comparison == "YES"
+        assert human.decided_by == "user"

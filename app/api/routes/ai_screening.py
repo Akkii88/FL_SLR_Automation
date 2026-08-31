@@ -98,11 +98,13 @@ async def get_ai_screening_results(
 ):
     """
     Get AI screening results with optional filters.
-    Returns only active (most recent) results.
+    Returns only active (most recent) results with paper titles.
     """
     from sqlalchemy import and_
 
-    query = db.query(AIScreeningResult).filter(
+    query = db.query(AIScreeningResult, Paper).join(
+        Paper, AIScreeningResult.paper_id == Paper.id
+    ).filter(
         AIScreeningResult.is_active == True
     )
 
@@ -112,22 +114,31 @@ async def get_ai_screening_results(
         query = query.filter(AIScreeningResult.confidence == confidence)
 
     total = query.count()
-    results = query.order_by(AIScreeningResult.paper_id).offset(
+    rows = query.order_by(AIScreeningResult.paper_id).offset(
         (page - 1) * page_size
     ).limit(page_size).all()
+
+    results = []
+    for ai_result, paper in rows:
+        d = ai_result.to_dict()
+        d['title'] = paper.title
+        results.append(d)
 
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "results": [r.to_dict() for r in results],
+        "results": results,
     }
 
 
 @router.get("/paper/{paper_id}")
 async def get_paper_ai_screening(paper_id: int, db: Session = Depends(get_db)):
     """Get AI screening result for a specific paper."""
-    result = db.query(AIScreeningResult).filter(
+    from sqlalchemy import and_
+    result = db.query(AIScreeningResult, Paper).join(
+        Paper, AIScreeningResult.paper_id == Paper.id
+    ).filter(
         and_(
             AIScreeningResult.paper_id == paper_id,
             AIScreeningResult.is_active == True,
@@ -137,7 +148,10 @@ async def get_paper_ai_screening(paper_id: int, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=404, detail="No AI screening result found for this paper.")
 
-    return result.to_dict()
+    ai_result, paper = result
+    d = ai_result.to_dict()
+    d['title'] = paper.title
+    return d
 
 
 @router.get("/queue")
