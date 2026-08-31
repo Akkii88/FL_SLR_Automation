@@ -1,0 +1,49 @@
+{
+  "title": "Is \"Best\" Really Best? A Systematic Review of Evidence Quality Behind Federated Learning Algorithm Superiority Claims under Non-IID Data",
+  "version": "1.0.0",
+  "config_schema_version": "1.0",
+  "start_date": "2019-01-01",
+  "end_date": "2026-08-30",
+  "primary_source": "OpenAlex",
+  "search_families": [
+    {
+      "name": "A",
+      "description": "Core Federated Learning + Non-IID + Comparison",
+      "query": "(federated learning) AND (non-IID OR heterogeneous) AND (comparison OR comparative OR benchmark OR evaluation)",
+      "enabled": true
+    },
+    {
+      "name": "B",
+      "description": "Federated Learning algorithm names + heterogeneity",
+      "query": "(FedAvg OR FedProx OR SCAFFOLD OR FedNova OR FedOpt OR Moon OR FedBN) AND (non-IID OR heterogeneous OR skewed)",
+      "enabled": true
+    },
+    {
+      "name": "C",
+      "description": "Non-IID construction methods + Federated Learning",
+      "query": "(Dirichlet OR pathological OR shard-based OR label skew OR quantity skew) AND (federated learning)",
+      "enabled": true
+    },
+    {
+      "name": "D",
+      "description": "Benchmark/comparative FL terminology",
+      "query": "(federated learning) AND (benchmark OR state-of-the-art OR outperforms OR superior) AND (non-IID OR heterogeneous)",
+      "enabled": true
+    },
+    {
+      "name": "E",
+      "description": "Personalized Federated Learning + heterogeneity",
+      "query": "(personalized federated learning OR FedPer OR pFL) AND (non-IID OR heterogeneous)",
+      "enabled": true
+    },
+    {
+      "name": "F",
+      "description": "Robust/asynchronous/optimization FL + heterogeneity",
+      "query": "(robust federated learning OR asynchronous federated learning OR federated optimization) AND (non-IID OR heterogeneous)",
+      "enabled": true
+    }
+  ],
+  "max_candidates_per_family": 1000,
+  "created_at": "2026-08-31 10:25:14.935468+00:00",
+  "updated_at": "2026-08-31 17:49:47.718470+00:00"
+}

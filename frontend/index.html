@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FL-SLR: Is "Best" Really Best?</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }
+        .header { background: linear-gradient(135deg, #1a237e, #283593); color: white; padding: 20px 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        .header h1 { font-size: 1.5rem; font-weight: 600; }
+        .header p { font-size: 0.85rem; opacity: 0.85; margin-top: 4px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; }
+        .stat-card { background: white; border-radius: 10px; padding: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); text-align: center; }
+        .stat-card .number { font-size: 2rem; font-weight: 700; color: #1a237e; }
+        .stat-card .label { font-size: 0.8rem; color: #666; margin-top: 4px; }
+        .section { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+        .section h2 { font-size: 1.1rem; margin-bottom: 15px; color: #1a237e; border-bottom: 2px solid #e8eaf6; padding-bottom: 8px; }
+        .btn { background: #1a237e; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; margin-right: 8px; margin-bottom: 8px; }
+        .btn:hover { background: #283593; }
+        .btn-secondary { background: #5c6bc0; }
+        .btn-success { background: #2e7d32; }
+        .btn-warning { background: #f57f17; }
+        .btn-danger { background: #c62828; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+        th { background: #f5f5f5; font-weight: 600; color: #555; }
+        tr:hover { background: #f8f9ff; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; }
+        .badge-green { background: #e8f5e9; color: #2e7d32; }
+        .badge-red { background: #ffebee; color: #c62828; }
+        .badge-yellow { background: #fff8e1; color: #f57f17; }
+        .badge-blue { background: #e3f2fd; color: #1565c0; }
+        .badge-gray { background: #f5f5f5; color: #616161; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; color: #555; }
+        .form-group select, .form-group input, .form-group textarea { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.85rem; }
+        .form-group textarea { min-height: 80px; resize: vertical; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+        .tabs { display: flex; border-bottom: 2px solid #e0eaf6; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-weight: 500; color: #666; }
+        .tab.active { border-bottom-color: #1a237e; color: #1a237e; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 15px; font-size: 0.85rem; }
+        .alert-info { background: #e3f2fd; color: #1565c0; }
+        .alert-success { background: #e8f5e9; color: #2e7d32; }
+        .alert-warning { background: #fff8e1; color: #f57f17; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: white; border-radius: 12px; padding: 25px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; }
+        .modal h3 { margin-bottom: 15px; color: #1a237e; }
+        .modal-close { float: right; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #999; }
+        .pagination { display: flex; justify-content: center; gap: 8px; margin-top: 15px; }
+        .pagination button { padding: 6px 12px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer; }
+        .pagination button.active { background: #1a237e; color: white; border-color: #1a237e; }
+        .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .tooltip { font-size: 0.75rem; color: #888; margin-top: 3px; }
+        .progress-bar { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+        .progress-bar-fill { height: 100%; background: linear-gradient(90deg, #1a237e, #5c6bc0); border-radius: 4px; transition: width 0.3s; }
+        .evidence-profile { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 10px; }
+        .evidence-dim { padding: 10px; border-radius: 6px; text-align: center; font-size: 0.75rem; }
+        .evidence-dim.unknown { background: #f5f5f5; color: #999; }
+        .evidence-dim.low { background: #ffebee; color: #c62828; }
+        .evidence-dim.medium { background: #fff8e1; color: #f57f17; }
+        .evidence-dim.high { background: #e8f5e9; color: #2e7d32; }
+        #toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: white; font-size: 0.85rem; z-index: 2000; display: none; }
+        .toast-success { background: #2e7d32; }
+        .toast-error { background: #c62828; }
+        .toast-info { background: #1565c0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>FL-SLR Automation</h1>
+        <p>Is "Best" Really Best? A Systematic Review of Evidence Quality Behind Federated Learning Algorithm Superiority Claims under Non-IID Data</p>
+    </div>
+
+    <div class="container">
+        <div id="toast"></div>
+
+        <!-- Dashboard Stats -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card"><div class="number" id="statTotal">-</div><div class="label">Total Records</div></div>
+            <div class="stat-card"><div class="number" id="statUnique">-</div><div class="label">Unique Papers</div></div>
+            <div class="stat-card"><div class="number" id="statDuplicates">-</div><div class="label">Duplicates</div></div>
+            <div class="stat-card"><div class="number" id="statIncluded">-</div><div class="label">Included</div></div>
+            <div class="stat-card"><div class="number" id="statExcluded">-</div><div class="label">Excluded</div></div>
+            <div class="stat-card"><div class="number" id="statClaims">-</div><div class="label">Claims Extracted</div></div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab active" data-tab="search">Search</div>
+            <div class="tab" data-tab="papers">Papers</div>
+            <div class="tab" data-tab="screening">Screening</div>
+            <div class="tab" data-tab="extraction">Extraction</div>
+            <div class="tab" data-tab="evidence">Evidence</div>
+            <div class="tab" data-tab="prisma">PRISMA & Export</div>
+        </div>
+
+        <!-- Search Tab -->
+        <div class="tab-content active" id="tab-search">
+            <div class="section">
+                <h2>Search Configuration</h2>
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label>Search Family</label>
+                        <select id="searchFamily">
+                            <option value="A">A: Core FL + Non-IID + Comparison</option>
+                            <option value="B">B: FL Algorithm Names + Heterogeneity</option>
+                            <option value="C">C: Non-IID Methods + FL</option>
+                            <option value="D">D: Benchmark/Comparative FL</option>
+                            <option value="E">E: Personalized FL + Heterogeneity</option>
+                            <option value="F">F: Robust/Async/Optimization FL</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Candidates</label>
+                        <select id="maxCandidates">
+                            <option value="100">100</option>
+                            <option value="300">300</option>
+                            <option value="500" selected>500</option>
+                            <option value="1000">1000</option>
+                            <option value="5000">5000</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="display:flex;align-items:flex-end;">
+                        <button class="btn" onclick="runSearch()">Run Search</button>
+                        <button class="btn btn-secondary" onclick="runAllSearches()">Run All Families</button>
+                    </div>
+                </div>
+                <div id="searchStatus"></div>
+            </div>
+            <div class="section">
+                <h2>Search History</h2>
+                <table id="searchHistoryTable">
+                    <thead><tr><th>ID</th><th>Family</th><th>Source</th><th>Query</th><th>Results</th><th>Date</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Papers Tab -->
+        <div class="tab-content" id="tab-papers">
+            <div class="section">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+                    <h2>Papers</h2>
+                    <div>
+                        <select id="paperFilter" onchange="loadPapers()" style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;">
+                            <option value="">All Status</option>
+                            <option value="not_screened">Not Screened</option>
+                            <option value="include">Included</option>
+                            <option value="exclude">Excluded</option>
+                            <option value="borderline">Borderline</option>
+                        </select>
+                    </div>
+                </div>
+                <table id="papersTable">
+                    <thead><tr><th>ID</th><th>Title</th><th>Year</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                <div class="pagination" id="papersPagination"></div>
+            </div>
+        </div>
+
+        <!-- Screening Tab -->
+        <div class="tab-content" id="tab-screening">
+            <div class="section">
+                <h2>Next Paper to Screen</h2>
+                <div id="screeningPaper"></div>
+            </div>
+            <div class="section">
+                <h2>Screening Progress</h2>
+                <div id="screeningProgress"></div>
+            </div>
+        </div>
+
+        <!-- Extraction Tab -->
+        <div class="tab-content" id="tab-extraction">
+            <div class="section">
+                <h2>Create Claim</h2>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Paper</label>
+                        <select id="claimPaperId"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Claim Scope</label>
+                        <select id="claimScope"></select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Claim Text (verbatim from paper)</label>
+                    <textarea id="claimText" placeholder="e.g., FedX outperforms FedAvg on CIFAR-10 with alpha=0.1"></textarea>
+                </div>
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label>Winner Algorithm</label>
+                        <input type="text" id="claimWinner" placeholder="e.g., FedX">
+                    </div>
+                    <div class="form-group">
+                        <label>Non-IID Type</label>
+                        <select id="claimNonIid"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Partition Method</label>
+                        <select id="claimPartition"></select>
+                    </div>
+                </div>
+                <button class="btn btn-success" onclick="createClaim()">Create Claim</button>
+            </div>
+            <div class="section">
+                <h2>Claims</h2>
+                <table id="claimsTable">
+                    <thead><tr><th>ID</th><th>Paper</th><th>Scope</th><th>Winner</th><th>Evidence</th><th>Actions</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Evidence Tab -->
+        <div class="tab-content" id="tab-evidence">
+            <div class="section">
+                <h2>Evidence Quality Overview</h2>
+                <div id="evidenceOverview"></div>
+            </div>
+        </div>
+
+        <!-- PRISMA Tab -->
+        <div class="tab-content" id="tab-prisma">
+            <div class="section">
+                <h2>PRISMA Flow</h2>
+                <div id="prismaFlow"></div>
+            </div>
+            <div class="section">
+                <h2>Exports</h2>
+                <button class="btn" onclick="downloadExcel()">Download Excel Export</button>
+                <button class="btn btn-secondary" onclick="downloadRIS()">Download RIS</button>
+                <button class="btn btn-secondary" onclick="downloadBibTeX()">Download BibTeX</button>
+                <button class="btn btn-warning" onclick="prepareNotebookLM()">Prepare NotebookLM Batches</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Paper Detail Modal -->
+    <div class="modal-overlay" id="paperModal">
+        <div class="modal">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <div id="paperModalContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const API = 'http://127.0.0.1:8000';
+        let currentPage = 1;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDashboard();
+            loadPapers();
+            loadSearchHistory();
+            loadCodebookValues();
+            setupTabs();
+        });
+
+        function setupTabs() {
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+                    if (tab.dataset.tab === 'screening') loadScreening();
+                    if (tab.dataset.tab === 'evidence') loadEvidenceOverview();
+                    if (tab.dataset.tab === 'prisma') loadPrisma();
+                });
+            });
+        }
+
+        async function api(endpoint, options = {}) {
+            const res = await fetch(API + endpoint, {
+                headers: { 'Content-Type': 'application/json' },
+                ...options
+            });
+            if (!res.ok && res.headers.get('content-type')?.includes('json')) {
+                const err = await res.json();
+                throw new Error(err.detail || 'API error');
+            }
+            return res;
+        }
+
+        async function apiJSON(endpoint, options = {}) {
+            const res = await api(endpoint, options);
+            return res.json();
+        }
+
+        function toast(msg, type = 'info') {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = 'toast-' + type;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 3000);
+        }
+
+        // Dashboard
+        async function loadDashboard() {
+            try {
+                const data = await apiJSON('/api/dashboard/');
+                document.getElementById('statTotal').textContent = data.total_records;
+                document.getElementById('statUnique').textContent = data.unique_papers;
+                document.getElementById('statDuplicates').textContent = data.duplicates;
+                document.getElementById('statIncluded').textContent = data.screening.included;
+                document.getElementById('statExcluded').textContent = data.screening.excluded;
+                document.getElementById('statClaims').textContent = data.evidence.total_claims;
+            } catch(e) { console.error(e); }
+        }
+
+        // Search
+        async function runSearch() {
+            const family = document.getElementById('searchFamily').value;
+            const max = document.getElementById('maxCandidates').value;
+            const status = document.getElementById('searchStatus');
+            status.innerHTML = '<div class="alert alert-info">Running search family ' + family + '...</div>';
+            try {
+                const result = await apiJSON('/api/search/run', {
+                    method: 'POST',
+                    body: JSON.stringify({ family, max_candidates: parseInt(max) })
+                });
+                status.innerHTML = '<div class="alert alert-success">Search complete! Saved ' + result.records_saved + ' new records.</div>';
+                loadDashboard();
+                loadSearchHistory();
+                loadPapers();
+            } catch(e) {
+                status.innerHTML = '<div class="alert alert-warning">Error: ' + e.message + '</div>';
+            }
+        }
+
+        async function runAllSearches() {
+            const max = document.getElementById('maxCandidates').value;
+            const status = document.getElementById('searchStatus');
+            status.innerHTML = '<div class="alert alert-info">Running all search families...</div>';
+            try {
+                const result = await apiJSON('/api/search/run-all?max_candidates=' + max, { method: 'POST' });
+                let total = 0;
+                result.results.forEach(r => total += r.records_saved || 0);
+                status.innerHTML = '<div class="alert alert-success">All searches complete! Saved ' + total + ' new records.</div>';
+                loadDashboard();
+                loadSearchHistory();
+                loadPapers();
+            } catch(e) {
+                status.innerHTML = '<div class="alert alert-warning">Error: ' + e.message + '</div>';
+            }
+        }
+
+        async function loadSearchHistory() {
+            try {
+                const data = await apiJSON('/api/search/history');
+                const tbody = document.querySelector('#searchHistoryTable tbody');
+                tbody.innerHTML = data.map(r => `
+                    <tr>
+                        <td>${r.id}</td>
+                        <td>${r.search_family}</td>
+                        <td>${r.source}</td>
+                        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.exact_query || ''}</td>
+                        <td>${r.records_saved}</td>
+                        <td>${r.search_date ? new Date(r.search_date).toLocaleDateString() : ''}</td>
+                    </tr>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        // Papers
+        async function loadPapers(page = 1) {
+            currentPage = page;
+            const filter = document.getElementById('paperFilter').value;
+            try {
+                let url = '/api/papers/?page=' + page + '&page_size=20';
+                if (filter) url += '&status=' + filter;
+                const data = await apiJSON(url);
+                const tbody = document.querySelector('#papersTable tbody');
+                tbody.innerHTML = data.papers.map(p => `
+                    <tr>
+                        <td>${p.id}</td>
+                        <td style="max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.title}</td>
+                        <td>${p.publication_year || ''}</td>
+                        <td>${p.source || ''}</td>
+                        <td><span class="badge badge-${statusColor(p.screening_status)}">${p.screening_status}</span></td>
+                        <td><button class="btn" style="padding:4px 8px;font-size:0.75rem;" onclick="viewPaper(${p.id})">View</button></td>
+                    </tr>
+                `).join('');
+                // Pagination
+                const totalPages = Math.ceil(data.total / 20);
+                const pag = document.getElementById('papersPagination');
+                pag.innerHTML = `
+                    <button ${page <= 1 ? 'disabled' : ''} onclick="loadPapers(${page-1})">&laquo;</button>
+                    <button class="active">${page} / ${totalPages || 1}</button>
+                    <button ${page >= totalPages ? 'disabled' : ''} onclick="loadPapers(${page+1})">&raquo;</button>
+                `;
+            } catch(e) { console.error(e); }
+        }
+
+        function statusColor(status) {
+            const colors = { not_screened: 'gray', include: 'green', exclude: 'red', borderline: 'yellow', awaiting_full_text: 'blue' };
+            return colors[status] || 'gray';
+        }
+
+        async function viewPaper(id) {
+            try {
+                const p = await apiJSON('/api/papers/' + id);
+                const content = document.getElementById('paperModalContent');
+                content.innerHTML = `
+                    <h3>${p.title}</h3>
+                    <p><strong>Authors:</strong> ${(p.authors || []).join(', ')}</p>
+                    <p><strong>Year:</strong> ${p.publication_year || 'Not reported'} | <strong>Source:</strong> ${p.source || 'Not reported'}</p>
+                    <p><strong>DOI:</strong> ${p.doi || 'Not reported'} | <strong>OA:</strong> ${p.is_open_access ? 'Yes' : 'No'}</p>
+                    <p><strong>Screening:</strong> <span class="badge badge-${statusColor(p.screening_status)}">${p.screening_status}</span></p>
+                    <h4 style="margin-top:15px;">Abstract</h4>
+                    <p style="background:#f5f5f5;padding:12px;border-radius:6px;">${p.abstract || 'No abstract available.'}</p>
+                    ${p.pdf_url ? '<p><strong>PDF:</strong> <a href="' + p.pdf_url + '" target="_blank">Open PDF</a></p>' : ''}
+                    <h4 style="margin-top:15px;">Screening History</h4>
+                    ${(p.screening_history || []).map(s => `
+                        <div style="background:#f8f9ff;padding:10px;border-radius:6px;margin-bottom:8px;">
+                            <strong>Stage:</strong> ${s.stage} | <strong>Decision:</strong> ${s.decision || 'pending'}<br>
+                            <small>Q1=${s.q1 || '-'} | Q2=${s.q2 || '-'} | Q3=${s.q3 || '-'} | Q4=${s.q4 || '-'}</small>
+                        </div>
+                    `).join('') || '<p>No screening decisions yet.</p>'}
+                    <h4 style="margin-top:15px;">Notes</h4>
+                    ${(p.notes || []).map(n => `
+                        <div style="background:#fff8e1;padding:10px;border-radius:6px;margin-bottom:8px;">
+                            <strong>${n.note_type}:</strong> ${n.content}
+                            ${n.page ? '<br><small>Page ' + n.page + (n.section ? ', ' + n.section : '') + '</small>' : ''}
+                        </div>
+                    `).join('') || '<p>No notes yet.</p>'}
+                    <div style="margin-top:15px;">
+                        <button class="btn btn-success" onclick="quickScreen(${p.id}, 'include')">Include</button>
+                        <button class="btn btn-danger" onclick="quickScreen(${p.id}, 'exclude')">Exclude</button>
+                        <button class="btn btn-warning" onclick="quickScreen(${p.id}, 'borderline')">Borderline</button>
+                    </div>
+                `;
+                document.getElementById('paperModal').classList.add('active');
+            } catch(e) { toast('Error loading paper: ' + e.message, 'error'); }
+        }
+
+        function closeModal() {
+            document.getElementById('paperModal').classList.remove('active');
+        }
+
+        async function quickScreen(id, decision) {
+            try {
+                await apiJSON('/api/screening/submit', {
+                    method: 'POST',
+                    body: JSON.stringify({ paper_id: id, decision })
+                });
+                toast('Decision recorded: ' + decision, 'success');
+                closeModal();
+                loadPapers();
+                loadDashboard();
+            } catch(e) { toast('Error: ' + e.message, 'error'); }
+        }
+
+        // Screening
+        async function loadScreening() {
+            try {
+                const next = await apiJSON('/api/screening/next');
+                const el = document.getElementById('screeningPaper');
+                if (!next.paper) {
+                    el.innerHTML = '<div class="alert alert-info">No more papers to screen.</div>';
+                } else {
+                    const p = next.paper;
+                    el.innerHTML = `
+                        <div style="background:#f8f9ff;padding:15px;border-radius:8px;">
+                            <h4>${p.title}</h4>
+                            <p><strong>Year:</strong> ${p.publication_year || '-'} | <strong>Source:</strong> ${p.source || '-'}</p>
+                            <p style="margin-top:10px;">${p.abstract || 'No abstract available.'}</p>
+                            <div style="margin-top:15px;">
+                                <div class="form-group">
+                                    <label>Q1: Does the study experimentally compare at least two FL algorithms/methods?</label>
+                                    <select id="sq1"><option value="">--</option><option value="YES">YES</option><option value="NO">NO</option><option value="UNCLEAR">UNCLEAR</option></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Q2: Does it evaluate under Non-IID or heterogeneous conditions?</label>
+                                    <select id="sq2"><option value="">--</option><option value="YES">YES</option><option value="NO">NO</option><option value="UNCLEAR">UNCLEAR</option></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Q3: Does it contain an explicit comparative/superiority claim?</label>
+                                    <select id="sq3"><option value="">--</option><option value="YES">YES</option><option value="NO">NO</option><option value="UNCLEAR">UNCLEAR</option></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Q4: Is enough full text available?</label>
+                                    <select id="sq4"><option value="">--</option><option value="YES">YES</option><option value="NO">NO</option><option value="UNCLEAR">UNCLEAR</option></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Decision</label>
+                                    <select id="sdecision">
+                                        <option value="include">Include</option>
+                                        <option value="exclude">Exclude</option>
+                                        <option value="borderline">Borderline</option>
+                                        <option value="awaiting_full_text">Awaiting Full Text</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Exclusion Reason (if excluding)</label>
+                                    <select id="sexclReason">
+                                        <option value="">--</option>
+                                        <option value="not_primary_empirical_study">Not primary empirical study</option>
+                                        <option value="no_fl_algorithm_comparison">No FL algorithm comparison</option>
+                                        <option value="iid_only">IID only</option>
+                                        <option value="no_non_iid_heterogeneity_evaluation">No Non-IID evaluation</option>
+                                        <option value="no_explicit_comparative_superiority_claim">No superiority claim</option>
+                                        <option value="framework_only_comparison">Framework-only comparison</option>
+                                        <option value="theoretical_only">Theoretical only</option>
+                                        <option value="insufficient_full_text">Insufficient full text</option>
+                                        <option value="duplicate">Duplicate</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <button class="btn btn-success" onclick="submitScreening(${p.id})">Submit Decision</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                // Progress
+                const progress = await apiJSON('/api/screening/progress');
+                document.getElementById('screeningProgress').innerHTML = `
+                    <div class="grid-3">
+                        <div class="stat-card"><div class="number">${progress.not_screened}</div><div class="label">Not Screened</div></div>
+                        <div class="stat-card"><div class="number">${progress.included}</div><div class="label">Included</div></div>
+                        <div class="stat-card"><div class="number">${progress.excluded}</div><div class="label">Excluded</div></div>
+                    </div>
+                    <div class="progress-bar"><div class="progress-bar-fill" style="width:${progress.screening_progress_pct}%"></div></div>
+                    <p style="text-align:center;margin-top:5px;font-size:0.8rem;color:#666;">${progress.screening_progress_pct}% complete</p>
+                `;
+            } catch(e) { console.error(e); }
+        }
+
+        async function submitScreening(id) {
+            const body = {
+                paper_id: id,
+                q1_fl_comparison: document.getElementById('sq1').value || null,
+                q2_non_iid: document.getElementById('sq2').value || null,
+                q3_superiority_claim: document.getElementById('sq3').value || null,
+                q4_full_text_available: document.getElementById('sq4').value || null,
+                decision: document.getElementById('sdecision').value,
+                exclusion_reason: document.getElementById('sexclReason').value || null,
+            };
+            try {
+                await apiJSON('/api/screening/submit', { method: 'POST', body: JSON.stringify(body) });
+                toast('Screening decision recorded', 'success');
+                loadScreening();
+                loadDashboard();
+            } catch(e) { toast('Error: ' + e.message, 'error'); }
+        }
+
+        // Extraction
+        async function loadCodebookValues() {
+            try {
+                const cb = await apiJSON('/api/extraction/codebook');
+                document.getElementById('claimScope').innerHTML = cb.claim_scopes.map(s => '<option value="' + s + '">' + s + '</option>').join('');
+                document.getElementById('claimNonIid').innerHTML = '<option value="">--</option>' + cb.non_iid_types.map(s => '<option value="' + s + '">' + s + '</option>').join('');
+                document.getElementById('claimPartition').innerHTML = '<option value="">--</option>' + cb.partition_methods.map(s => '<option value="' + s + '">' + s + '</option>').join('');
+            } catch(e) { console.error(e); }
+            // Load papers for dropdown
+            try {
+                const papers = await apiJSON('/api/papers/?page_size=200');
+                document.getElementById('claimPaperId').innerHTML = papers.papers.map(p => '<option value="' + p.id + '">' + p.id + ': ' + p.title.substring(0, 60) + '...</option>').join('');
+            } catch(e) { console.error(e); }
+        }
+
+        async function createClaim() {
+            const body = {
+                paper_id: parseInt(document.getElementById('claimPaperId').value),
+                claim_text: document.getElementById('claimText').value || null,
+                claim_scope: document.getElementById('claimScope').value || null,
+                winner_algorithm: document.getElementById('claimWinner').value || null,
+                non_iid_type: document.getElementById('claimNonIid').value || null,
+                partition_method: document.getElementById('claimPartition').value || null,
+            };
+            try {
+                await apiJSON('/api/extraction/claims', { method: 'POST', body: JSON.stringify(body) });
+                toast('Claim created', 'success');
+                loadClaims();
+                loadDashboard();
+            } catch(e) { toast('Error: ' + e.message, 'error'); }
+        }
+
+        async function loadClaims() {
+            try {
+                const data = await apiJSON('/api/extraction/claims');
+                const tbody = document.querySelector('#claimsTable tbody');
+                tbody.innerHTML = data.claims.map(c => `
+                    <tr>
+                        <td>${c.id}</td>
+                        <td>${c.paper_id}</td>
+                        <td>${c.claim_scope || '-'}</td>
+                        <td>${c.winner_algorithm || '-'}</td>
+                        <td><button class="btn" style="padding:4px 8px;font-size:0.75rem;" onclick="addEvidence(${c.id})">Add EQ</button></td>
+                        <td></td>
+                    </tr>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        async function addEvidence(claimId) {
+            const ranking = prompt('Ranking Robustness (Explicitly Stable/Observationally Stable/Explicitly Unstable/Not Assessable):');
+            if (!ranking) return;
+            const body = {
+                claim_id: claimId,
+                ranking_robustness: ranking,
+                direct_statistical_test: confirm('Direct statistical test?'),
+                independent_runs: parseInt(prompt('Independent runs (number):')) || null,
+            };
+            try {
+                await apiJSON('/api/extraction/evidence-quality', { method: 'POST', body: JSON.stringify(body) });
+                toast('Evidence quality recorded', 'success');
+                loadDashboard();
+            } catch(e) { toast('Error: ' + e.message, 'error'); }
+        }
+
+        // Evidence
+        async function loadEvidenceOverview() {
+            try {
+                const data = await apiJSON('/api/evidence/overview');
+                document.getElementById('evidenceOverview').innerHTML = `
+                    <div class="grid-3">
+                        <div class="stat-card"><div class="number">${data.total_claims}</div><div class="label">Total Claims</div></div>
+                        <div class="stat-card"><div class="number">${data.assessed_claims}</div><div class="label">Assessed</div></div>
+                        <div class="stat-card"><div class="number">${data.assessment_coverage_pct}%</div><div class="label">Coverage</div></div>
+                    </div>
+                    <h4 style="margin-top:15px;">Direct Statistical Tests</h4>
+                    <p>${data.dimension_3_direct_statistics.direct_test} claims with direct tests</p>
+                    <h4 style="margin-top:10px;">Ranking Robustness Distribution</h4>
+                    ${(data.dimension_5_ranking.distribution || []).map(d => '<p>' + (d.type || 'Unspecified') + ': ' + d.count + '</p>').join('')}
+                `;
+            } catch(e) { console.error(e); }
+        }
+
+        // PRISMA
+        async function loadPrisma() {
+            try {
+                const data = await apiJSON('/api/prisma/flow');
+                document.getElementById('prismaFlow').innerHTML = `
+                    <div class="grid-3">
+                        <div class="stat-card"><div class="number">${data.identification.total_records_retrieved}</div><div class="label">Records Retrieved</div></div>
+                        <div class="stat-card"><div class="number">${data.screening.duplicates_removed}</div><div class="label">Duplicates Removed</div></div>
+                        <div class="stat-card"><div class="number">${data.screening.unique_records}</div><div class="label">Unique Records</div></div>
+                        <div class="stat-card"><div class="number">${data.screening.records_screened}</div><div class="label">Records Screened</div></div>
+                        <div class="stat-card"><div class="number">${data.screening.title_abstract_excluded}</div><div class="label">Excluded</div></div>
+                        <div class="stat-card"><div class="number">${data.included.final_included}</div><div class="label">Final Included</div></div>
+                    </div>
+                `;
+            } catch(e) { console.error(e); }
+        }
+
+        function downloadExcel() { window.open(API + '/api/prisma/excel', '_blank'); }
+        function downloadRIS() { window.open(API + '/api/prisma/ris', '_blank'); }
+        function downloadBibTeX() { window.open(API + '/api/prisma/bibtex', '_blank'); }
+
+        async function prepareNotebookLM() {
+            try {
+                const result = await apiJSON('/api/prisma/notebooklm-prep', { method: 'POST' });
+                toast('NotebookLM batches prepared: ' + result.total_batches + ' batches', 'success');
+            } catch(e) { toast('Error: ' + e.message, 'error'); }
+        }
+    </script>
+</body>
+</html>
