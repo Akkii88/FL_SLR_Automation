@@ -26,13 +26,22 @@ class BatchScreenRequest(BaseModel):
 
 @router.get("/status")
 async def ai_screening_status(db: Session = Depends(get_db)):
-    """Get AI screening configuration status."""
-    service = AIScreeningService(db)
+    """Get AI screening configuration and provider status."""
+    from app.services.llm_manager import get_provider_status
+    provider_status = get_provider_status()
+
     return {
-        "configured": service.is_configured(),
-        "provider": service.provider or "not set",
-        "model": service.model or "not set",
+        "configured": True,  # At least one provider is configured
+        "provider_status": provider_status,
     }
+
+
+@router.get("/provider-events")
+async def get_provider_events(clear: bool = True):
+    """Get pending quota/rate-limit notifications for frontend."""
+    from app.services.llm_manager import get_quota_notifications
+    notifications = get_quota_notifications(clear=clear)
+    return {"notifications": notifications}
 
 
 @router.get("/summary")

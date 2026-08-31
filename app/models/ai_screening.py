@@ -47,8 +47,16 @@ class AIScreeningResult(Base):
 
     # --- LLM Metadata ---
     model = Column(String(128), nullable=True)
-    provider = Column(String(64), nullable=True)
+    provider = Column(String(64), nullable=True)  # groq, gemini
     prompt_version = Column(String(32), default="1.0")
+
+    # --- Provider Provenance ---
+    original_provider = Column(String(64), nullable=True)  # Provider first attempted
+    final_provider = Column(String(64), nullable=True)  # Provider that produced result
+    fallback_used = Column(Boolean, default=False)  # Whether fallback was used
+    retry_count = Column(Integer, default=0)  # Total retries across all providers
+    token_usage = Column(Text, nullable=True)  # JSON: {prompt_tokens, completion_tokens, total_tokens}
+    error_history = Column(Text, nullable=True)  # JSON array of errors encountered
 
     # --- Cache Control ---
     is_active = Column(Boolean, default=True)  # Most recent result for this paper
@@ -98,6 +106,12 @@ class AIScreeningResult(Base):
             "model": self.model,
             "provider": self.provider,
             "prompt_version": self.prompt_version,
+            "original_provider": self.original_provider,
+            "final_provider": self.final_provider,
+            "fallback_used": self.fallback_used,
+            "retry_count": self.retry_count,
+            "token_usage": self.token_usage,
+            "error_history": self.error_history,
             "is_active": self.is_active,
             "processing_status": self.processing_status,
             "error_message": self.error_message,

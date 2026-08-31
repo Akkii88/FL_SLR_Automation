@@ -39,6 +39,10 @@ def start_batch(batch_size: int = 25, requested_by: str = "user") -> AIScreening
     Creates the batch record and launches a background thread.
     Returns the batch record immediately.
     """
+    # Reset provider status for new batch
+    from app.services.llm_manager import reset_provider_status
+    reset_provider_status()
+
     db = SessionLocal()
     try:
         # Create batch record

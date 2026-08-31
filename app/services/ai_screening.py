@@ -56,146 +56,13 @@ class AIScreeningService:
 
     def __init__(self, db: Session):
         self.db = db
-        self.provider = settings.llm_provider
-        self.api_key = settings.llm_api_key
-        self.model = settings.llm_model
+        # Provider manager handles provider selection and fallback
+        from app.services.llm_manager import LLMProviderManager
+        self.llm_manager = LLMProviderManager(db)
 
     def is_configured(self) -> bool:
-        """Check if LLM is configured."""
-        return bool(self.provider and self.api_key and self.model)
-
-    def _get_client(self):
-        """Get the appropriate LLM client."""
-        if not self.is_configured():
-            raise RuntimeError("LLM not configured.")
-
-        if self.provider.lower() in ("openai", "groq"):
-            from openai import OpenAI
-            if self.provider.lower() == "groq":
-                return OpenAI(api_key=self.api_key, base_url="https://api.groq.com/openai/v1")
-            return OpenAI(api_key=self.api_key)
-        elif self.provider.lower() == "anthropic":
-            from anthropic import Anthropic
-            return Anthropic(api_key=self.api_key)
-        else:
-            raise ValueError(f"Unsupported provider: {self.provider}")
-
-    def _call_llm(self, system_prompt: str, user_prompt: str) -> dict:
-        """Call LLM and return structured output. May raise RateLimitError or other exceptions."""
-        client = self._get_client()
-
-        if self.provider.lower() in ("openai", "groq"):
-            try:
-                response = client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=0.1,
-                    response_format={"type": "json_object"},
-                )
-                content = response.choices[0].message.content
-            except Exception as e:
-                # Check for rate-limit (429) from OpenAI/Groq client
-                retry_after = None
-                status_code = getattr(e, "status_code", None) or getattr(e, "code", None)
-                error_str = str(e).lower()
-                if status_code == 429 or "rate_limit" in error_str or "429" in error_str:
-                    # Try to extract Retry-After header
-                    retry_after = getattr(e, "retry_after", None)
-                    if retry_after is None:
-                        headers = getattr(e, "headers", {}) or {}
-                        retry_after = headers.get("retry-after") or headers.get("Retry-After")
-
-                    # Detect daily/permanent limits (don't retry these)
-                    is_daily = "per day" in error_str or "daily" in error_str or "tpd" in error_str
-
-                    raise RateLimitError(
-                        str(e),
-                        retry_after=float(retry_after) if retry_after else None,
-                        is_daily_limit=is_daily
-                    )
-                raise  # Re-raise non-rate-limit errors
-
-        elif self.provider.lower() == "anthropic":
-            try:
-                response = client.messages.create(
-                    model=self.model,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}],
-                    temperature=0.1,
-                    max_tokens=4096,
-                )
-                content = response.content[0].text
-            except Exception as e:
-                status_code = getattr(e, "status_code", None)
-                if status_code == 429 or "rate_limit" in str(e).lower():
-                    retry_after = getattr(e, "retry_after", None)
-                    raise RateLimitError(str(e), retry_after=float(retry_after) if retry_after else None)
-                raise
-
-        return {"content": content, "model": self.model}
-
-    def _call_llm_with_retry(self, system_prompt: str, user_prompt: str, paper_id: int) -> dict:
-        """
-        Call LLM with rate-limit retry logic.
-
-        Retries on 429 (rate limit) with exponential backoff + jitter.
-        Does NOT retry on permanent errors (400, 401, 403, 404, etc.).
-
-        Returns dict with content and model on success.
-        Raises the last exception if all retries fail.
-        """
-        max_retries = settings.llm_max_retries
-        initial_backoff = settings.llm_initial_backoff_seconds
-        max_backoff = settings.llm_max_backoff_seconds
-
-        last_exception = None
-
-        for attempt in range(1, max_retries + 2):  # attempt 1 = initial, then up to max_retries retries
-            try:
-                return self._call_llm(system_prompt, user_prompt)
-            except RateLimitError as e:
-                last_exception = e
-
-                # Don't retry daily/permanent limits
-                if e.is_daily_limit:
-                    logger.warning(
-                        f"Paper {paper_id}: Daily rate limit reached. Not retrying. Error: {e}"
-                    )
-                    raise
-
-                if attempt > max_retries:
-                    logger.warning(
-                        f"Paper {paper_id}: Rate limit exceeded after {max_retries} retries. Giving up."
-                    )
-                    raise
-
-                # Determine wait time
-                if e.retry_after and e.retry_after > 0:
-                    wait_seconds = e.retry_after
-                    source = "Retry-After header"
-                else:
-                    # Exponential backoff: 2s, 4s, 8s, 16s, 32s ...
-                    wait_seconds = min(initial_backoff * (2 ** (attempt - 1)), max_backoff)
-                    source = "exponential backoff"
-
-                # Add jitter (±25%)
-                jitter = wait_seconds * 0.25 * (2 * random.random() - 1)
-                wait_seconds = max(0.1, wait_seconds + jitter)
-
-                logger.info(
-                    f"Paper {paper_id}: Rate limited (attempt {attempt}/{max_retries + 1}). "
-                    f"Waiting {wait_seconds:.2f}s ({source}). Error: {e}"
-                )
-                time.sleep(wait_seconds)
-
-            except Exception:
-                # Non-rate-limit error: do not retry
-                raise
-
-        raise last_exception
+        """Check if any LLM provider is configured."""
+        return self.llm_manager.groq.is_configured or self.llm_manager.gemini.is_configured
 
     def _get_system_prompt(self) -> str:
         """System prompt for first-pass screening."""
@@ -379,9 +246,12 @@ OUTPUT FORMAT (valid JSON only):
             system_prompt = self._get_system_prompt()
             user_prompt = self._get_user_prompt(paper)
 
-            # Call LLM with rate-limit retry handling
-            llm_response = self._call_llm_with_retry(system_prompt, user_prompt, paper_id)
-            parsed = self._parse_llm_response(llm_response["content"])
+            # Call LLM with provider manager (handles fallback)
+            from app.services.llm_manager import LLMError
+            llm_response, provider_meta = self.llm_manager.call_with_fallback(
+                system_prompt, user_prompt, paper_id
+            )
+            parsed = self._parse_llm_response(llm_response.content)
 
             if parsed is None:
                 result.processing_status = "failed"
@@ -409,8 +279,24 @@ OUTPUT FORMAT (valid JSON only):
             result.q2_evidence = parsed.get("q2_evidence", "")
             result.q3_evidence = parsed.get("q3_evidence", "")
             result.q4_evidence = parsed.get("q4_evidence", "")
-            result.model = llm_response["model"]
-            result.provider = self.provider
+            result.model = llm_response.model
+            result.provider = llm_response.provider
+            result.prompt_version = PROMPT_VERSION
+
+            # Provider provenance
+            result.original_provider = provider_meta.get("original_provider")
+            result.final_provider = provider_meta.get("final_provider", llm_response.provider)
+            result.fallback_used = provider_meta.get("fallback_used", False)
+            result.retry_count = provider_meta.get("retry_count", 0)
+
+            # Token usage
+            if llm_response.token_usage:
+                result.token_usage = json.dumps(llm_response.token_usage)
+
+            # Error history (if any errors occurred)
+            if provider_meta.get("errors"):
+                result.error_history = json.dumps(provider_meta["errors"])
+
             result.processing_status = "completed"
             result.is_active = True
 
@@ -421,7 +307,12 @@ OUTPUT FORMAT (valid JSON only):
                 action="ai_screening",
                 entity_type="paper",
                 entity_id=paper_id,
-                description=f"AI screening: {parsed['recommendation']} (conf: {parsed.get('confidence', 'medium')})",
+                description=(
+                    f"AI screening: {parsed['recommendation']} "
+                    f"(conf: {parsed.get('confidence', 'medium')}, "
+                    f"provider: {llm_response.provider}, "
+                    f"fallback: {provider_meta.get('fallback_used', False)})"
+                ),
                 actor="system",
                 paper_id=paper_id,
             )
