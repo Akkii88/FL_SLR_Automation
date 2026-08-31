@@ -40,5 +40,5 @@ def get_db():
 
 def init_database():
     """Create all tables in the database."""
-    from app.models import paper, search_run, screening, pdf_file, deduplication, extraction, ai_screening  # noqa: F401
+    from app.models import paper, search_run, screening, pdf_file, deduplication, extraction, ai_screening, ai_batch  # noqa: F401
     Base.metadata.create_all(bind=engine)

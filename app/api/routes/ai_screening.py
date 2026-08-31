@@ -48,8 +48,9 @@ async def batch_screen(
     db: Session = Depends(get_db),
 ):
     """
-    Run AI screening on a batch of unscreened papers.
-    Processes papers that haven't been AI-screened yet.
+    Start an AI screening batch job.
+    Returns immediately with a batch ID. Processing happens in the background.
+    Use GET /api/ai-screening/batch/{id} to check progress.
     """
     if request is None:
         request = BatchScreenRequest()
@@ -62,8 +63,43 @@ async def batch_screen(
             detail="LLM not configured. Set LLM_PROVIDER, LLM_API_KEY, and LLM_MODEL in .env",
         )
 
-    result = service.batch_screen(batch_size=request.batch_size)
-    return result
+    # Start async batch job
+    from app.services.ai_batch_processor import start_batch
+    batch = start_batch(batch_size=request.batch_size)
+
+    return {
+        "status": "started",
+        "batch_id": batch.id,
+        "batch_size": request.batch_size,
+        "message": f"Batch {batch.id} started. Check progress at /api/ai-screening/batch/{batch.id}",
+    }
+
+
+@router.get("/batch/{batch_id}")
+async def get_batch_status(batch_id: int):
+    """Get the current status of a batch job."""
+    from app.services.ai_batch_processor import get_batch_status
+    status = get_batch_status(batch_id)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found.")
+    return status
+
+
+@router.get("/batches")
+async def list_batches(limit: int = Query(10, ge=1, le=50)):
+    """List recent batch jobs."""
+    from app.services.ai_batch_processor import list_batches
+    return {"batches": list_batches(limit=limit)}
+
+
+@router.post("/batch/{batch_id}/cancel")
+async def cancel_batch(batch_id: int):
+    """Cancel a running batch job."""
+    from app.services.ai_batch_processor import cancel_batch
+    success = cancel_batch(batch_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found or not running.")
+    return {"status": "cancelled", "batch_id": batch_id}
 
 
 @router.post("/retry/{paper_id}")

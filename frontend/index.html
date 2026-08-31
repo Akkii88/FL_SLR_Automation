@@ -745,29 +745,78 @@
         async function runAIScreening() {
             const batchSize = parseInt(document.getElementById('aiBatchSize').value);
             const progress = document.getElementById('aiScreeningProgress');
-            progress.innerHTML = '<div class="alert alert-info">Processing batch of ' + batchSize + ' papers...</div>';
+            progress.innerHTML = '<div class="alert alert-info">Starting batch of ' + batchSize + ' papers...</div>';
 
             try {
+                // Start the batch job
                 const result = await apiJSON('/api/ai-screening/batch-screen', {
                     method: 'POST',
                     body: JSON.stringify({ batch_size: batchSize })
                 });
 
-                if (result.status === 'no_papers') {
-                    progress.innerHTML = '<div class="alert alert-info">' + result.message + '</div>';
-                } else {
+                if (result.status === 'started') {
+                    const batchId = result.batch_id;
                     progress.innerHTML = `
-                        <div class="alert alert-success">
-                            Batch complete: ${result.processed} processed, ${result.succeeded} succeeded, ${result.failed} failed.
-                            <br>Recommendations: Include=${result.recommendations.likely_include}, Exclude=${result.recommendations.likely_exclude}, Unclear=${result.recommendations.unclear}
+                        <div class="alert alert-info">
+                            Batch ${batchId} started. Processing in background...
+                            <div id="batchProgressDetail"></div>
                         </div>
                     `;
+                    // Start polling for progress
+                    pollBatchProgress(batchId);
+                } else {
+                    progress.innerHTML = '<div class="alert alert-warning">Unexpected response: ' + JSON.stringify(result) + '</div>';
                 }
-                loadAIScreeningStatus();
-                loadAIResults();
             } catch(e) {
                 progress.innerHTML = '<div class="alert alert-warning">Error: ' + e.message + '</div>';
             }
+        }
+
+        async function pollBatchProgress(batchId) {
+            const progress = document.getElementById('aiScreeningProgress');
+            const detail = document.getElementById('batchProgressDetail');
+
+            const poll = async () => {
+                try {
+                    const status = await apiJSON('/api/ai-screening/batch/' + batchId);
+
+                    if (detail) {
+                        detail.innerHTML = `
+                            <div style="margin-top:8px;">
+                                <strong>Status:</strong> ${status.status} |
+                                <strong>Progress:</strong> ${status.processed}/${status.total_papers} |
+                                <strong>Succeeded:</strong> ${status.succeeded} |
+                                <strong>Failed:</strong> ${status.failed}
+                                ${status.current_paper_id ? '<br>Currently processing: Paper ' + status.current_paper_id : ''}
+                            </div>
+                            <div class="progress-bar"><div class="progress-bar-fill" style="width:${status.total_papers > 0 ? (status.processed / status.total_papers * 100) : 0}%"></div></div>
+                        `;
+                    }
+
+                    if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+                        // Final status
+                        progress.innerHTML = `
+                            <div class="alert ${status.status === 'completed' ? 'alert-success' : 'alert-warning'}">
+                                Batch ${batchId} ${status.status}: ${status.succeeded} succeeded, ${status.failed} failed, ${status.processed} total.
+                                ${status.error_message ? '<br>Error: ' + status.error_message : ''}
+                            </div>
+                        `;
+                        loadAIScreeningStatus();
+                        loadAIResults();
+                        loadFailedPapers();
+                        return; // Stop polling
+                    }
+
+                    // Continue polling every 3 seconds
+                    setTimeout(poll, 3000);
+
+                } catch(e) {
+                    console.error('Poll error:', e);
+                    progress.innerHTML = '<div class="alert alert-warning">Error checking batch progress: ' + e.message + '</div>';
+                }
+            };
+
+            poll();
         }
 
         async function loadAIScreeningSummary() {
