@@ -89,12 +89,72 @@ class GroqProvider(LLMProvider):
         error_str = str(error).lower()
         status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
 
-        # Check for rate limiting
+        # Check for 404 first (model/endpoint not found)
+        is_404 = (
+            status_code == 404 or
+            "404" in error_str or
+            "not found" in error_str
+        )
+
+        # Check for rate limiting (429 only)
         is_rate_limit = (
             status_code == 429 or
-            "rate_limit" in error_str or
-            "429" in error_str or
-            "too many requests" in error_str
+            (not is_404 and (
+                "rate_limit" in error_str or
+                "too many requests" in error_str
+            ))
+        )
+
+        # Check for daily quota exhaustion
+        is_daily = (
+            "per day" in error_str or
+            "daily" in error_str or
+            "tpd" in error_str or
+            "tokens per day" in error_str
+        )
+
+        # Check for authentication/authorization errors
+        is_auth = (
+            status_code in (401, 403) or
+            "unauthorized" in error_str or
+            "forbidden" in error_str or
+            "invalid api key" in error_str or
+            "authentication" in error_str
+        )
+
+        # Check for server errors (5xx)
+        is_server_error = (
+            (status_code is not None and 500 <= status_code < 600) or
+            "service unavailable" in error_str or
+            "internal server error" in error_str
+        )
+
+        # Permanent errors: auth, 404
+        is_permanent = is_auth or is_404
+
+        # Extract retry-after (only for rate limits)
+        retry_after = None
+        if is_rate_limit:
+            retry_after = getattr(error, "retry_after", None)
+            if retry_after is None:
+                headers = getattr(error, "headers", {}) or {}
+                retry_after = headers.get("retry-after") or headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        retry_after = float(retry_after)
+                    except (ValueError, TypeError):
+                        retry_after = None
+
+        return LLMError(
+            message=str(error),
+            status_code=status_code,
+            retry_after=retry_after,
+            is_rate_limit=is_rate_limit,
+            is_daily_limit=is_daily,
+            is_permanent=is_permanent,
+            is_404=is_404,
+            is_server_error=is_server_error,
+            provider="groq",
         )
 
         # Check for daily quota exhaustion

@@ -28,6 +28,8 @@ class LLMError(Exception):
     is_rate_limit: bool = False
     is_daily_limit: bool = False
     is_permanent: bool = False
+    is_404: bool = False  # Model/endpoint not found
+    is_server_error: bool = False  # 5xx errors
     provider: str = ""
 
 

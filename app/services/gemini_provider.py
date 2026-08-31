@@ -108,34 +108,48 @@ class GeminiProvider(LLMProvider):
         error_str = str(error).lower()
         status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
 
+        # Check for 404 first
+        is_404 = (
+            status_code == 404 or
+            "404" in error_str or
+            "not found" in error_str
+        )
+
         # Check for rate limiting
         is_rate_limit = (
             status_code == 429 or
-            "rate_limit" in error_str or
-            "429" in error_str or
-            "quota" in error_str or
-            "resource exhausted" in error_str or
-            "too many requests" in error_str
+            (not is_404 and (
+                "rate_limit" in error_str or
+                "too many requests" in error_str or
+                "resource exhausted" in error_str
+            ))
         )
 
         # Check for daily quota exhaustion
         is_daily = (
             "per day" in error_str or
             "daily" in error_str or
-            "daily limit" in error_str or
             "quota exceeded" in error_str
         )
 
-        # Check for permanent errors
-        is_permanent = (
-            status_code in (400, 401, 403, 404) or
+        # Check for authentication/authorization errors
+        is_auth = (
+            status_code in (401, 403) or
             "unauthorized" in error_str or
             "forbidden" in error_str or
             "invalid api key" in error_str or
-            "authentication" in error_str or
-            "bad request" in error_str or
-            "not found" in error_str
+            "authentication" in error_str
         )
+
+        # Check for server errors (5xx)
+        is_server_error = (
+            (status_code is not None and 500 <= status_code < 600) or
+            "service unavailable" in error_str or
+            "internal server error" in error_str
+        )
+
+        # Permanent errors: auth, 404
+        is_permanent = is_auth or is_404
 
         # Extract retry-after
         retry_after = None
@@ -157,5 +171,7 @@ class GeminiProvider(LLMProvider):
             is_rate_limit=is_rate_limit,
             is_daily_limit=is_daily,
             is_permanent=is_permanent,
+            is_404=is_404,
+            is_server_error=is_server_error,
             provider="gemini",
         )

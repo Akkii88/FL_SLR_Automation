@@ -85,6 +85,14 @@ async def root():
     }
 
 
-@app.get("/health")
-async def health():
-    return {"status": "ok", "environment": settings.app_env}
+@app.on_event("startup")
+async def startup_event():
+    """Run recovery on application startup."""
+    logger = logging.getLogger(__name__)
+    logger.info("Application starting up...")
+
+    # Recover interrupted batches from previous run
+    from app.services.ai_batch_processor import recover_interrupted_batches
+    recover_interrupted_batches()
+
+    logger.info("Startup complete")

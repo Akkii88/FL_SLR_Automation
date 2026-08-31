@@ -161,6 +161,7 @@ def get_quota_notifications(clear: bool = False) -> list:
 class LLMProviderManager:
     """
     Manages LLM provider selection, fallback, and rate limiting.
+    Fallback order: Groq → Gemini → OpenRouter
     """
 
     def __init__(self, db: Session):
@@ -296,20 +297,38 @@ class LLMProviderManager:
                     "provider": provider.name,
                     "attempt": attempt,
                     "error": e.message[:200],
+                    "status_code": e.status_code,
                     "is_rate_limit": e.is_rate_limit,
                     "is_daily_limit": e.is_daily_limit,
                     "is_permanent": e.is_permanent,
+                    "is_404": e.is_404,
+                    "is_server_error": e.is_server_error,
                 })
 
-                # Don't retry permanent errors
+                # Don't retry permanent errors (auth, 404 model not found)
                 if e.is_permanent:
-                    logger.warning(f"Paper {paper_id}: {provider.name} permanent error: {e.message[:100]}")
+                    logger.warning(
+                        f"Paper {paper_id}: {provider.name} permanent error "
+                        f"(status={e.status_code}): {e.message[:100]}"
+                    )
                     break
 
                 # Don't retry daily limits
                 if e.is_daily_limit:
                     logger.warning(f"Paper {paper_id}: {provider.name} daily quota exhausted")
                     break
+
+                # Don't retry 404 (model not found) - it's a configuration error
+                if e.is_404:
+                    logger.warning(
+                        f"Paper {paper_id}: {provider.name} 404 model not found. "
+                        f"Check model configuration: {getattr(settings, f'{provider.name}_model', 'unknown')}"
+                    )
+                    break
+
+                # Retry server errors (5xx) with backoff
+                if e.is_server_error:
+                    logger.warning(f"Paper {paper_id}: {provider.name} server error (5xx)")
 
                 # Check if we've exhausted retries
                 if attempt > max_retries:
@@ -350,12 +369,18 @@ class LLMProviderManager:
         return None, meta
 
     def _should_fallback(self, error: LLMError) -> bool:
-        """Determine if an error should trigger fallback to Gemini."""
+        """Determine if an error should trigger fallback to next provider."""
         # Fallback on rate limits and daily quota
         if error.is_rate_limit or error.is_daily_limit:
             return True
-        # Don't fallback on permanent errors (auth, config)
+        # Fallback on server errors (5xx)
+        if error.is_server_error:
+            return True
+        # Don't fallback on permanent errors (auth, 404 model not found)
         if error.is_permanent:
+            return False
+        # Don't fallback on 404 (model not found)
+        if error.is_404:
             return False
         # Fallback on other errors
         return True
