@@ -97,6 +97,7 @@
             <div class="tab active" data-tab="search">Search</div>
             <div class="tab" data-tab="papers">Papers</div>
             <div class="tab" data-tab="screening">Screening</div>
+            <div class="tab" data-tab="ai-screening">AI Screening</div>
             <div class="tab" data-tab="extraction">Extraction</div>
             <div class="tab" data-tab="evidence">Evidence</div>
             <div class="tab" data-tab="prisma">PRISMA & Export</div>
@@ -176,6 +177,52 @@
             <div class="section">
                 <h2>Screening Progress</h2>
                 <div id="screeningProgress"></div>
+            </div>
+        </div>
+
+        <!-- AI Screening Tab -->
+        <div class="tab-content" id="tab-ai-screening">
+            <div class="section">
+                <h2>AI First-Pass Screening</h2>
+                <div id="aiScreeningStatus" style="margin-bottom:15px;"></div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Batch Size</label>
+                        <select id="aiBatchSize">
+                            <option value="10">10 papers</option>
+                            <option value="25" selected>25 papers</option>
+                            <option value="50">50 papers</option>
+                            <option value="100">100 papers</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="display:flex;align-items:flex-end;gap:10px;">
+                        <button class="btn btn-success" onclick="runAIScreening()">Run AI Screening</button>
+                        <button class="btn btn-secondary" onclick="loadAIScreeningSummary()">Refresh Summary</button>
+                    </div>
+                </div>
+                <div id="aiScreeningProgress" style="margin-top:15px;"></div>
+            </div>
+            <div class="section">
+                <h2>Screening Results</h2>
+                <div class="grid-3" style="margin-bottom:15px;">
+                    <select id="aiFilterRec" onchange="loadAIResults()">
+                        <option value="">All Recommendations</option>
+                        <option value="likely_include">Likely Include</option>
+                        <option value="likely_exclude">Likely Exclude</option>
+                        <option value="unclear">Unclear</option>
+                    </select>
+                    <select id="aiFilterConf" onchange="loadAIResults()">
+                        <option value="">All Confidence</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <table id="aiResultsTable">
+                    <thead><tr><th>Paper ID</th><th>Title</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Rec</th><th>Conf</th><th>Actions</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                <div class="pagination" id="aiResultsPagination"></div>
             </div>
         </div>
 
@@ -665,6 +712,130 @@
                 toast('NotebookLM batches prepared: ' + result.total_batches + ' batches', 'success');
             } catch(e) { toast('Error: ' + e.message, 'error'); }
         }
+
+        // AI Screening
+        async function loadAIScreeningStatus() {
+            try {
+                const status = await apiJSON('/api/ai-screening/status');
+                const summary = await apiJSON('/api/ai-screening/summary');
+                document.getElementById('aiScreeningStatus').innerHTML = `
+                    <div class="grid-3">
+                        <div class="stat-card"><div class="number">${status.configured ? '✓' : '✗'}</div><div class="label">LLM Configured</div></div>
+                        <div class="stat-card"><div class="number">${summary.ai_screened}</div><div class="label">AI Screened</div></div>
+                        <div class="stat-card"><div class="number">${summary.remaining}</div><div class="label">Remaining</div></div>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <strong>Recommendations:</strong>
+                        Include: ${summary.by_recommendation.likely_include} |
+                        Exclude: ${summary.by_recommendation.likely_exclude} |
+                        Unclear: ${summary.by_recommendation.unclear}
+                    </div>
+                `;
+            } catch(e) { console.error(e); }
+        }
+
+        async function runAIScreening() {
+            const batchSize = parseInt(document.getElementById('aiBatchSize').value);
+            const progress = document.getElementById('aiScreeningProgress');
+            progress.innerHTML = '<div class="alert alert-info">Processing batch of ' + batchSize + ' papers...</div>';
+
+            try {
+                const result = await apiJSON('/api/ai-screening/batch-screen', {
+                    method: 'POST',
+                    body: JSON.stringify({ batch_size: batchSize })
+                });
+
+                if (result.status === 'no_papers') {
+                    progress.innerHTML = '<div class="alert alert-info">' + result.message + '</div>';
+                } else {
+                    progress.innerHTML = `
+                        <div class="alert alert-success">
+                            Batch complete: ${result.processed} processed, ${result.succeeded} succeeded, ${result.failed} failed.
+                            <br>Recommendations: Include=${result.recommendations.likely_include}, Exclude=${result.recommendations.likely_exclude}, Unclear=${result.recommendations.unclear}
+                        </div>
+                    `;
+                }
+                loadAIScreeningStatus();
+                loadAIResults();
+            } catch(e) {
+                progress.innerHTML = '<div class="alert alert-warning">Error: ' + e.message + '</div>';
+            }
+        }
+
+        async function loadAIScreeningSummary() {
+            await loadAIScreeningStatus();
+            await loadAIResults();
+        }
+
+        async function loadAIResults(page = 1) {
+            try {
+                const rec = document.getElementById('aiFilterRec') ? document.getElementById('aiFilterRec').value : '';
+                const conf = document.getElementById('aiFilterConf') ? document.getElementById('aiFilterConf').value : '';
+
+                let url = '/api/ai-screening/results?page=' + page + '&page_size=50';
+                if (rec) url += '&recommendation=' + rec;
+                if (conf) url += '&confidence=' + conf;
+
+                const data = await apiJSON(url);
+                const tbody = document.querySelector('#aiResultsTable tbody');
+                tbody.innerHTML = data.results.map(r => `
+                    <tr>
+                        <td>${r.paper_id}</td>
+                        <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.title || ''}</td>
+                        <td><span class="badge badge-${r.q1_fl_comparison === 'YES' ? 'green' : r.q1_fl_comparison === 'NO' ? 'red' : 'yellow'}">${r.q1_fl_comparison || '-'}</span></td>
+                        <td><span class="badge badge-${r.q2_non_iid === 'YES' ? 'green' : r.q2_non_iid === 'NO' ? 'red' : 'yellow'}">${r.q2_non_iid || '-'}</span></td>
+                        <td><span class="badge badge-${r.q3_superiority_claim === 'YES' ? 'green' : r.q3_superiority_claim === 'NO' ? 'red' : 'yellow'}">${r.q3_superiority_claim || '-'}</span></td>
+                        <td><span class="badge badge-${r.q4_info_available === 'YES' ? 'green' : r.q4_info_available === 'NO' ? 'red' : 'yellow'}">${r.q4_info_available || '-'}</span></td>
+                        <td><span class="badge badge-${r.recommendation === 'likely_include' ? 'green' : r.recommendation === 'likely_exclude' ? 'red' : 'yellow'}">${r.recommendation || '-'}</span></td>
+                        <td><span class="badge badge-${r.confidence === 'high' ? 'blue' : r.confidence === 'medium' ? 'yellow' : 'gray'}">${r.confidence || '-'}</span></td>
+                        <td><button class="btn" style="padding:4px 8px;font-size:0.75rem;" onclick="viewAIResult(${r.paper_id})">View</button></td>
+                    </tr>
+                `).join('');
+
+                // Pagination
+                const totalPages = Math.ceil(data.total / 50);
+                document.getElementById('aiResultsPagination').innerHTML = `
+                    <button ${page <= 1 ? 'disabled' : ''} onclick="loadAIResults(${page-1})">&laquo;</button>
+                    <button class="active">${page} / ${totalPages || 1}</button>
+                    <button ${page >= totalPages ? 'disabled' : ''} onclick="loadAIResults(${page+1})">&raquo;</button>
+                `;
+            } catch(e) { console.error(e); }
+        }
+
+        async function viewAIResult(paperId) {
+            try {
+                const r = await apiJSON('/api/ai-screening/paper/' + paperId);
+                const content = document.getElementById('paperModalContent');
+                content.innerHTML = `
+                    <h3>AI Screening Result</h3>
+                    <p><strong>Paper ID:</strong> ${r.paper_id}</p>
+                    <p><strong>Model:</strong> ${r.model || 'N/A'} (${r.provider || 'N/A'})</p>
+                    <p><strong>Prompt Version:</strong> ${r.prompt_version || 'N/A'}</p>
+                    <hr>
+                    <p><strong>Q1 (FL Comparison):</strong> <span class="badge badge-${r.q1_fl_comparison === 'YES' ? 'green' : r.q1_fl_comparison === 'NO' ? 'red' : 'yellow'}">${r.q1_fl_comparison || 'N/A'}</span></p>
+                    <p><em>Evidence: ${r.q1_evidence || 'N/A'}</em></p>
+                    <p><strong>Q2 (Non-IID):</strong> <span class="badge badge-${r.q2_non_iid === 'YES' ? 'green' : r.q2_non_iid === 'NO' ? 'red' : 'yellow'}">${r.q2_non_iid || 'N/A'}</span></p>
+                    <p><em>Evidence: ${r.q2_evidence || 'N/A'}</em></p>
+                    <p><strong>Q3 (Superiority Claim):</strong> <span class="badge badge-${r.q3_superiority_claim === 'YES' ? 'green' : r.q3_superiority_claim === 'NO' ? 'red' : 'yellow'}">${r.q3_superiority_claim || 'N/A'}</span></p>
+                    <p><em>Evidence: ${r.q3_evidence || 'N/A'}</em></p>
+                    <p><strong>Q4 (Info Available):</strong> <span class="badge badge-${r.q4_info_available === 'YES' ? 'green' : r.q4_info_available === 'NO' ? 'red' : 'yellow'}">${r.q4_info_available || 'N/A'}</span></p>
+                    <p><em>Evidence: ${r.q4_evidence || 'N/A'}</em></p>
+                    <hr>
+                    <p><strong>Recommendation:</strong> <span class="badge badge-${r.recommendation === 'likely_include' ? 'green' : r.recommendation === 'likely_exclude' ? 'red' : 'yellow'}">${r.recommendation || 'N/A'}</span></p>
+                    <p><strong>Confidence:</strong> <span class="badge badge-${r.confidence === 'high' ? 'blue' : r.confidence === 'medium' ? 'yellow' : 'gray'}">${r.confidence || 'N/A'}</span></p>
+                    <p><strong>Reasoning:</strong> ${r.reasoning || 'N/A'}</p>
+                `;
+                document.getElementById('paperModal').classList.add('active');
+            } catch(e) { toast('Error: ' + e.message, 'error'); }
+        }
+
+        // Load AI screening on tab click
+        document.querySelectorAll('.tab[data-tab="ai-screening"]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                loadAIScreeningStatus();
+                loadAIResults();
+            });
+        });
     </script>
 </body>
 </html>

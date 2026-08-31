@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.core.config import settings
-from app.api.routes import search, papers, screening, config, dashboard, provenance, export, deduplication, pdf, extraction, evidence, prisma, llm
+from app.api.routes import search, papers, screening, config, dashboard, provenance, export, deduplication, pdf, extraction, evidence, prisma, llm, ai_screening
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +51,7 @@ app.include_router(extraction.router, prefix="/api/extraction", tags=["Extractio
 app.include_router(evidence.router, prefix="/api/evidence", tags=["Evidence"])
 app.include_router(prisma.router, prefix="/api/prisma", tags=["PRISMA"])
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
+app.include_router(ai_screening.router, prefix="/api/ai-screening", tags=["AI Screening"])
 
 
 @app.get("/")

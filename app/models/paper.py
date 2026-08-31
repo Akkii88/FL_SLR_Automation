@@ -90,6 +90,7 @@ class Paper(Base):
     dedup_logs_b = relationship("DeduplicationLog", foreign_keys="DeduplicationLog.paper_id_b", cascade="all, delete-orphan")
     notes = relationship("PaperNote", back_populates="paper", cascade="all, delete-orphan")
     claims = relationship("Claim", back_populates="paper", cascade="all, delete-orphan")
+    ai_screening_results = relationship("AIScreeningResult", back_populates="paper", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_papers_year_status", "publication_year", "screening_status"),
