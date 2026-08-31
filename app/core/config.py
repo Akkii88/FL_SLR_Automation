@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     llm_api_key: str = Field(default="")
     llm_model: str = Field(default="")
 
+    # --- LLM Retry / Rate Limiting ---
+    llm_max_retries: int = Field(default=5, description="Max retry attempts for rate-limited LLM requests")
+    llm_initial_backoff_seconds: float = Field(default=2.0, description="Initial backoff seconds for retries")
+    llm_max_backoff_seconds: float = Field(default=60.0, description="Maximum backoff seconds (cap)")
+    llm_request_delay_seconds: float = Field(default=0.5, description="Delay between consecutive LLM requests to pace TPM")
+
     # --- Project Root ---
     project_root: Path = Field(
         default=Path(__file__).resolve().parent.parent.parent

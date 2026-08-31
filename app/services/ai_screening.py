@@ -13,6 +13,8 @@ IMPORTANT:
 import json
 import logging
 import hashlib
+import time
+import random
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -31,6 +33,13 @@ PROMPT_VERSION = "1.0"
 
 # Cache: hash of paper metadata → AI result (in-memory for session)
 _response_cache = {}
+
+
+class RateLimitError(Exception):
+    """Raised when a 429 rate-limit response is received from the LLM API."""
+    def __init__(self, message: str, retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.retry_after = retry_after  # seconds, from Retry-After header if available
 
 
 def _make_cache_key(paper: Paper) -> str:
@@ -71,31 +80,104 @@ class AIScreeningService:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
     def _call_llm(self, system_prompt: str, user_prompt: str) -> dict:
-        """Call LLM and return structured output."""
+        """Call LLM and return structured output. May raise RateLimitError or other exceptions."""
         client = self._get_client()
 
         if self.provider.lower() in ("openai", "groq"):
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content
+            try:
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content
+            except Exception as e:
+                # Check for rate-limit (429) from OpenAI/Groq client
+                retry_after = None
+                status_code = getattr(e, "status_code", None) or getattr(e, "code", None)
+                if status_code == 429 or "rate_limit" in str(e).lower() or "429" in str(e):
+                    # Try to extract Retry-After header
+                    retry_after = getattr(e, "retry_after", None)
+                    if retry_after is None:
+                        headers = getattr(e, "headers", {}) or {}
+                        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+                    raise RateLimitError(str(e), retry_after=float(retry_after) if retry_after else None)
+                raise  # Re-raise non-rate-limit errors
+
         elif self.provider.lower() == "anthropic":
-            response = client.messages.create(
-                model=self.model,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-                temperature=0.1,
-                max_tokens=4096,
-            )
-            content = response.content[0].text
+            try:
+                response = client.messages.create(
+                    model=self.model,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                    temperature=0.1,
+                    max_tokens=4096,
+                )
+                content = response.content[0].text
+            except Exception as e:
+                status_code = getattr(e, "status_code", None)
+                if status_code == 429 or "rate_limit" in str(e).lower():
+                    retry_after = getattr(e, "retry_after", None)
+                    raise RateLimitError(str(e), retry_after=float(retry_after) if retry_after else None)
+                raise
 
         return {"content": content, "model": self.model}
+
+    def _call_llm_with_retry(self, system_prompt: str, user_prompt: str, paper_id: int) -> dict:
+        """
+        Call LLM with rate-limit retry logic.
+
+        Retries on 429 (rate limit) with exponential backoff + jitter.
+        Does NOT retry on permanent errors (400, 401, 403, 404, etc.).
+
+        Returns dict with content and model on success.
+        Raises the last exception if all retries fail.
+        """
+        max_retries = settings.llm_max_retries
+        initial_backoff = settings.llm_initial_backoff_seconds
+        max_backoff = settings.llm_max_backoff_seconds
+
+        last_exception = None
+
+        for attempt in range(1, max_retries + 2):  # attempt 1 = initial, then up to max_retries retries
+            try:
+                return self._call_llm(system_prompt, user_prompt)
+            except RateLimitError as e:
+                last_exception = e
+                if attempt > max_retries:
+                    logger.warning(
+                        f"Paper {paper_id}: Rate limit exceeded after {max_retries} retries. Giving up."
+                    )
+                    raise
+
+                # Determine wait time
+                if e.retry_after and e.retry_after > 0:
+                    wait_seconds = e.retry_after
+                    source = "Retry-After header"
+                else:
+                    # Exponential backoff: 2s, 4s, 8s, 16s, 32s ...
+                    wait_seconds = min(initial_backoff * (2 ** (attempt - 1)), max_backoff)
+                    source = "exponential backoff"
+
+                # Add jitter (±25%)
+                jitter = wait_seconds * 0.25 * (2 * random.random() - 1)
+                wait_seconds = max(0.1, wait_seconds + jitter)
+
+                logger.info(
+                    f"Paper {paper_id}: Rate limited (attempt {attempt}/{max_retries + 1}). "
+                    f"Waiting {wait_seconds:.2f}s ({source}). Error: {e}"
+                )
+                time.sleep(wait_seconds)
+
+            except Exception:
+                # Non-rate-limit error: do not retry
+                raise
+
+        raise last_exception
 
     def _get_system_prompt(self) -> str:
         """System prompt for first-pass screening."""
@@ -279,7 +361,8 @@ OUTPUT FORMAT (valid JSON only):
             system_prompt = self._get_system_prompt()
             user_prompt = self._get_user_prompt(paper)
 
-            llm_response = self._call_llm(system_prompt, user_prompt)
+            # Call LLM with rate-limit retry handling
+            llm_response = self._call_llm_with_retry(system_prompt, user_prompt, paper_id)
             parsed = self._parse_llm_response(llm_response["content"])
 
             if parsed is None:
@@ -387,7 +470,13 @@ OUTPUT FORMAT (valid JSON only):
             "details": [],
         }
 
-        for paper in papers:
+        request_delay = settings.llm_request_delay_seconds
+
+        for i, paper in enumerate(papers):
+            # Pace requests to reduce TPM bursts
+            if i > 0 and request_delay > 0:
+                time.sleep(request_delay)
+
             try:
                 ai_result = self.screen_paper(paper.id, use_cache=True)
                 results["processed"] += 1
