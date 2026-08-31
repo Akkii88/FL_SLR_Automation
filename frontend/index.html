@@ -203,6 +203,14 @@
                 <div id="aiScreeningProgress" style="margin-top:15px;"></div>
             </div>
             <div class="section">
+                <h2>Failed Papers (Retry)</h2>
+                <p style="font-size:0.8rem;color:#666;margin-bottom:10px;">Papers that failed AI screening due to rate limits or errors. Click Retry to re-process.</p>
+                <table id="aiFailedTable">
+                    <thead><tr><th>Paper ID</th><th>Title</th><th>Error</th><th>Attempts</th><th>Action</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="section">
                 <h2>Screening Results</h2>
                 <div class="grid-3" style="margin-bottom:15px;">
                     <select id="aiFilterRec" onchange="loadAIResults()">
@@ -834,8 +842,81 @@
             tab.addEventListener('click', () => {
                 loadAIScreeningStatus();
                 loadAIResults();
+                loadFailedPapers();
             });
         });
-    </script>
-</body>
-</html>
+
+        // Failed papers retry
+        async function loadFailedPapers() {
+            try {
+                // Get all AI screening results, find papers with failed status
+                const data = await apiJSON('/api/ai-screening/results?page_size=200');
+                const failedPaperIds = new Map();
+
+                // We need to query for failed papers specifically
+                // Use the queue endpoint with a custom approach
+                const allData = await apiJSON('/api/ai-screening/results?page_size=1000');
+
+                // Actually, let's get failed papers from a dedicated query
+                // For now, check each paper's status via the paper endpoint
+                const tbody = document.querySelector('#aiFailedTable tbody');
+
+                // Get papers that have failed AI screening
+                // We'll use the screening queue approach: get all papers, check which have failed
+                const failedResponse = await fetch(API + '/api/ai-screening/failed-papers?page_size=100', {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!failedResponse.ok) {
+                    tbody.innerHTML = '<tr><td colspan="5">No failed papers found.</td></tr>';
+                    return;
+                }
+
+                const failedData = await failedResponse.json();
+
+                if (!failedData.papers || failedData.papers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5">No failed papers. All screened papers succeeded.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = failedData.papers.map(p => `
+                    <tr>
+                        <td>${p.id}</td>
+                        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.title || ''}</td>
+                        <td style="max-width:300px;font-size:0.75rem;color:#c62828;">${p.error_message || 'Unknown error'}</td>
+                        <td>${p.attempts || 1}</td>
+                        <td><button class="btn btn-warning" style="padding:4px 8px;font-size:0.75rem;" onclick="retryFailedPaper(${p.id})">Retry</button></td>
+                    </tr>
+                `).join('');
+            } catch(e) {
+                console.error('Failed to load failed papers:', e);
+                document.querySelector('#aiFailedTable tbody').innerHTML = '<tr><td colspan="5">No failed papers found.</td></tr>';
+            }
+        }
+
+        async function retryFailedPaper(paperId) {
+            if (!confirm('Retry AI screening for paper ' + paperId + '?')) return;
+
+            try {
+                toast('Retrying paper ' + paperId + '...', 'info');
+
+                const result = await apiJSON('/api/ai-screening/retry/' + paperId, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+
+                if (result.status === 'success') {
+                    toast('Paper ' + paperId + ' screened successfully: ' + result.recommendation, 'success');
+                } else {
+                    toast('Paper ' + paperId + ' failed again: ' + (result.error_message || 'Unknown error'), 'error');
+                }
+
+                // Refresh all views
+                loadAIScreeningStatus();
+                loadAIResults();
+                loadFailedPapers();
+            } catch(e) {
+                toast('Error: ' + e.message, 'error');
+                loadFailedPapers();
+            }
+        }
