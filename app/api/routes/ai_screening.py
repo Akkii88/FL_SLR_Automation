@@ -137,6 +137,10 @@ async def retry_failed_paper(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/screen/{paper_id}")
+async def screen_single_paper(
     paper_id: int,
     use_cache: bool = True,
     db: Session = Depends(get_db),
