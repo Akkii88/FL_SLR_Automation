@@ -26,7 +26,12 @@ class OpenRouterProvider(LLMProvider):
 
     @property
     def is_configured(self) -> bool:
-        return bool(settings.openrouter_api_key and settings.openrouter_model)
+        return bool(settings.openrouter_enabled and settings.openrouter_api_key and settings.openrouter_model)
+
+    @property
+    def is_disabled(self) -> bool:
+        """Returns True if OpenRouter is explicitly disabled (e.g., model unavailable)."""
+        return not settings.openrouter_enabled
 
     def _get_client(self):
         if self._client is None:

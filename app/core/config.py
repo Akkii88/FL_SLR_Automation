@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     gemini_request_delay_seconds: float = Field(default=0.3, description="Delay between Gemini requests")
 
     # --- OpenRouter Fallback Provider (3rd) ---
+    openrouter_enabled: bool = Field(default=False, description="Whether OpenRouter is enabled (disabled if model unavailable)")
     openrouter_api_key: str = Field(default="", description="OpenRouter API key")
     openrouter_model: str = Field(default="openai/gpt-oss-120b:free", description="OpenRouter model")
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter base URL")

@@ -106,24 +106,34 @@ def get_provider_status() -> dict:
     result = {
         "groq": {**_provider_status["groq"].to_dict(), "configured": groq.is_configured},
         "gemini": {**_provider_status["gemini"].to_dict(), "configured": gemini.is_configured},
-        "openrouter": {**_provider_status["openrouter"].to_dict(), "configured": openrouter.is_configured},
+        "openrouter": {
+            **_provider_status["openrouter"].to_dict(),
+            "configured": openrouter.is_configured,
+            "enabled": settings.openrouter_enabled,
+            "disabled_reason": "Model unavailable (openai/gpt-oss-120b:free)" if not settings.openrouter_enabled else None,
+        },
     }
 
     # Determine current provider and fallback status
+    # OpenRouter is only used if explicitly enabled
     if _provider_status["groq"].is_available and groq.is_configured:
         result["current_provider"] = "groq"
         result["fallback_active"] = False
     elif _provider_status["gemini"].is_available and gemini.is_configured:
         result["current_provider"] = "gemini"
         result["fallback_active"] = True
-    elif openrouter.is_configured:
+    elif openrouter.is_configured and settings.openrouter_enabled:
         result["current_provider"] = "openrouter"
         result["fallback_active"] = True
     else:
         result["current_provider"] = "none"
         result["fallback_active"] = False
 
-    result["fallback_chain"] = ["groq", "gemini", "openrouter"]
+    # Show active fallback chain (excluding disabled providers)
+    chain = ["groq", "gemini"]
+    if settings.openrouter_enabled:
+        chain.append("openrouter")
+    result["fallback_chain"] = chain
 
     return result
 
@@ -236,8 +246,8 @@ class LLMProviderManager:
             else:
                 raise last_error
 
-        # Fallback to OpenRouter (3rd)
-        if self.openrouter.is_configured and _provider_status["openrouter"].is_available:
+        # Fallback to OpenRouter (3rd) - ONLY if enabled
+        if settings.openrouter_enabled and self.openrouter.is_configured and _provider_status["openrouter"].is_available:
             metadata["fallback_used"] = True
             response, meta = self._try_provider(
                 self.openrouter, system_prompt, user_prompt, paper_id
@@ -250,14 +260,14 @@ class LLMProviderManager:
                 metadata["final_provider"] = "openrouter"
                 return response, metadata
 
-            # All three providers failed
+            # All providers failed
             last_error = meta.get("last_error")
             self._emit_quota_event("openrouter", last_error, paper_id)
             raise last_error
 
-        # No fallback available
+        # No more providers available (OpenRouter disabled or all failed)
         raise LLMError(
-            "All configured providers failed or are unavailable",
+            "All available providers failed (OpenRouter disabled or unavailable)",
             provider="manager",
         )
 
