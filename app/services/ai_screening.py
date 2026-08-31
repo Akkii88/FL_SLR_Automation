@@ -37,9 +37,10 @@ _response_cache = {}
 
 class RateLimitError(Exception):
     """Raised when a 429 rate-limit response is received from the LLM API."""
-    def __init__(self, message: str, retry_after: Optional[float] = None):
+    def __init__(self, message: str, retry_after: Optional[float] = None, is_daily_limit: bool = False):
         super().__init__(message)
         self.retry_after = retry_after  # seconds, from Retry-After header if available
+        self.is_daily_limit = is_daily_limit  # True if this is a daily/permanent limit
 
 
 def _make_cache_key(paper: Paper) -> str:
@@ -99,13 +100,22 @@ class AIScreeningService:
                 # Check for rate-limit (429) from OpenAI/Groq client
                 retry_after = None
                 status_code = getattr(e, "status_code", None) or getattr(e, "code", None)
-                if status_code == 429 or "rate_limit" in str(e).lower() or "429" in str(e):
+                error_str = str(e).lower()
+                if status_code == 429 or "rate_limit" in error_str or "429" in error_str:
                     # Try to extract Retry-After header
                     retry_after = getattr(e, "retry_after", None)
                     if retry_after is None:
                         headers = getattr(e, "headers", {}) or {}
                         retry_after = headers.get("retry-after") or headers.get("Retry-After")
-                    raise RateLimitError(str(e), retry_after=float(retry_after) if retry_after else None)
+
+                    # Detect daily/permanent limits (don't retry these)
+                    is_daily = "per day" in error_str or "daily" in error_str or "tpd" in error_str
+
+                    raise RateLimitError(
+                        str(e),
+                        retry_after=float(retry_after) if retry_after else None,
+                        is_daily_limit=is_daily
+                    )
                 raise  # Re-raise non-rate-limit errors
 
         elif self.provider.lower() == "anthropic":
@@ -148,6 +158,14 @@ class AIScreeningService:
                 return self._call_llm(system_prompt, user_prompt)
             except RateLimitError as e:
                 last_exception = e
+
+                # Don't retry daily/permanent limits
+                if e.is_daily_limit:
+                    logger.warning(
+                        f"Paper {paper_id}: Daily rate limit reached. Not retrying. Error: {e}"
+                    )
+                    raise
+
                 if attempt > max_retries:
                     logger.warning(
                         f"Paper {paper_id}: Rate limit exceeded after {max_retries} retries. Giving up."
