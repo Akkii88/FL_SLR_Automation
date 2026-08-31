@@ -316,3 +316,126 @@ class TestGeminiFallback:
         assert result.processing_status == "completed"
         assert result.fallback_used is True
         assert result.final_provider == "gemini"
+
+
+class TestOpenRouterFallback:
+    """Test OpenRouter as 3rd fallback provider."""
+
+    def test_openrouter_fallback_after_groq_and_gemini_fail(self, db):
+        """Test that OpenRouter is used when both Groq and Gemini fail."""
+        paper = make_paper(db)
+        service = AIScreeningService(db)
+
+        openrouter_response = LLMResponse(
+            content=json.dumps({
+                "q1_fl_comparison": "YES", "q2_non_iid": "YES",
+                "q3_superiority_claim": "YES", "q4_info_available": "YES",
+                "recommendation": "likely_include", "confidence": "medium",
+                "reasoning": "openrouter analysis",
+                "q1_evidence": "", "q2_evidence": "",
+                "q3_evidence": "", "q4_evidence": "",
+            }),
+            model="openai/gpt-oss-120b:free",
+            provider="openrouter",
+        )
+
+        meta = {
+            "original_provider": "groq",
+            "final_provider": "openrouter",
+            "fallback_used": True,
+            "retry_count": 10,
+            "errors": [
+                {"provider": "groq", "error": "daily quota exhausted"},
+                {"provider": "gemini", "error": "daily quota exhausted"},
+            ],
+            "provider_attempts": [
+                {"provider": "groq", "result": "failed"},
+                {"provider": "gemini", "result": "failed"},
+                {"provider": "openrouter", "result": "success"},
+            ],
+        }
+
+        service.llm_manager = make_mock_manager(db, response=openrouter_response, meta=meta)
+        result = service.screen_paper(paper.id, use_cache=False)
+
+        assert result.processing_status == "completed"
+        assert result.fallback_used is True
+        assert result.original_provider == "groq"
+        assert result.final_provider == "openrouter"
+        assert result.provider == "openrouter"
+        assert result.model == "openai/gpt-oss-120b:free"
+
+    def test_all_three_providers_fail(self, db):
+        """Test that paper is marked failed when all providers fail."""
+        paper = make_paper(db)
+        service = AIScreeningService(db)
+
+        error = LLMError("All providers failed", provider="manager")
+        service.llm_manager = make_mock_manager(db, error=error)
+        result = service.screen_paper(paper.id, use_cache=False)
+        assert result.processing_status == "failed"
+
+    def test_groq_succeeds_no_fallback(self, db):
+        """Test that Groq success doesn't trigger any fallback."""
+        paper = make_paper(db)
+        service = AIScreeningService(db)
+
+        groq_response = make_llm_response(provider="groq")
+        meta = {
+            "original_provider": "groq",
+            "final_provider": "groq",
+            "fallback_used": False,
+            "retry_count": 0,
+            "errors": [],
+            "provider_attempts": [{"provider": "groq", "result": "success"}],
+        }
+
+        service.llm_manager = make_mock_manager(db, response=groq_response, meta=meta)
+        result = service.screen_paper(paper.id, use_cache=False)
+
+        assert result.processing_status == "completed"
+        assert result.fallback_used is False
+        assert result.final_provider == "groq"
+        assert result.provider == "groq"
+
+    def test_provider_provenance_with_openrouter(self, db):
+        """Test that provider provenance is correctly stored for OpenRouter results."""
+        paper = make_paper(db)
+        service = AIScreeningService(db)
+
+        openrouter_response = LLMResponse(
+            content=json.dumps({
+                "q1_fl_comparison": "NO", "q2_non_iid": "NO",
+                "q3_superiority_claim": "NO", "q4_info_available": "YES",
+                "recommendation": "likely_exclude", "confidence": "high",
+                "reasoning": "not an FL comparison study",
+                "q1_evidence": "", "q2_evidence": "",
+                "q3_evidence": "", "q4_evidence": "",
+            }),
+            model="openai/gpt-oss-120b:free",
+            provider="openrouter",
+        )
+
+        meta = {
+            "original_provider": "groq",
+            "final_provider": "openrouter",
+            "fallback_used": True,
+            "retry_count": 5,
+            "errors": [{"provider": "groq", "error": "rate limit"}, {"provider": "gemini", "error": "rate limit"}],
+            "provider_attempts": [
+                {"provider": "groq", "result": "failed"},
+                {"provider": "gemini", "result": "failed"},
+                {"provider": "openrouter", "result": "success"},
+            ],
+        }
+
+        service.llm_manager = make_mock_manager(db, response=openrouter_response, meta=meta)
+        result = service.screen_paper(paper.id, use_cache=False)
+
+        assert result.original_provider == "groq"
+        assert result.final_provider == "openrouter"
+        assert result.fallback_used is True
+        assert result.retry_count == 5
+        assert result.model == "openai/gpt-oss-120b:free"
+        # Error history should be stored
+        assert result.error_history is not None

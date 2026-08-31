@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     gemini_max_backoff_seconds: float = Field(default=30.0, description="Max backoff cap for Gemini")
     gemini_request_delay_seconds: float = Field(default=0.3, description="Delay between Gemini requests")
 
+    # --- OpenRouter Fallback Provider (3rd) ---
+    openrouter_api_key: str = Field(default="", description="OpenRouter API key")
+    openrouter_model: str = Field(default="openai/gpt-oss-120b:free", description="OpenRouter model")
+    openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter base URL")
+
+    # --- OpenRouter-specific Retry / Rate Limiting ---
+    openrouter_max_retries: int = Field(default=3, description="Max retry attempts for OpenRouter")
+    openrouter_initial_backoff_seconds: float = Field(default=2.0, description="Initial backoff for OpenRouter")
+    openrouter_max_backoff_seconds: float = Field(default=30.0, description="Max backoff cap for OpenRouter")
+    openrouter_request_delay_seconds: float = Field(default=1.0, description="Delay between OpenRouter requests")
+
     # --- Legacy LLM settings (kept for backward compatibility) ---
     llm_max_retries: int = Field(default=5, description="Legacy: Max retry attempts")
     llm_initial_backoff_seconds: float = Field(default=2.0, description="Legacy: Initial backoff")

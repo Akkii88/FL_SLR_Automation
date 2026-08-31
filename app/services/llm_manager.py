@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.services.llm_provider import LLMProvider, LLMResponse, LLMError
 from app.services.groq_provider import GroqProvider
 from app.services.gemini_provider import GeminiProvider
+from app.services.openrouter_provider import OpenRouterProvider
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ class ProviderStatus:
 _provider_status = {
     "groq": ProviderStatus("groq"),
     "gemini": ProviderStatus("gemini"),
+    "openrouter": ProviderStatus("openrouter"),
 }
 
 # Quota event deduplication
@@ -99,22 +101,29 @@ def get_provider_status() -> dict:
     """Get current status of all providers."""
     groq = GroqProvider()
     gemini = GeminiProvider()
+    openrouter = OpenRouterProvider()
 
     result = {
         "groq": {**_provider_status["groq"].to_dict(), "configured": groq.is_configured},
         "gemini": {**_provider_status["gemini"].to_dict(), "configured": gemini.is_configured},
+        "openrouter": {**_provider_status["openrouter"].to_dict(), "configured": openrouter.is_configured},
     }
 
     # Determine current provider and fallback status
     if _provider_status["groq"].is_available and groq.is_configured:
         result["current_provider"] = "groq"
         result["fallback_active"] = False
-    elif gemini.is_configured:
+    elif _provider_status["gemini"].is_available and gemini.is_configured:
         result["current_provider"] = "gemini"
+        result["fallback_active"] = True
+    elif openrouter.is_configured:
+        result["current_provider"] = "openrouter"
         result["fallback_active"] = True
     else:
         result["current_provider"] = "none"
         result["fallback_active"] = False
+
+    result["fallback_chain"] = ["groq", "gemini", "openrouter"]
 
     return result
 
@@ -125,6 +134,7 @@ def reset_provider_status():
     _provider_status = {
         "groq": ProviderStatus("groq"),
         "gemini": ProviderStatus("gemini"),
+        "openrouter": ProviderStatus("openrouter"),
     }
     _quota_events = {}
 
@@ -157,6 +167,7 @@ class LLMProviderManager:
         self.db = db
         self.groq = GroqProvider()
         self.gemini = GeminiProvider()
+        self.openrouter = OpenRouterProvider()
 
     def call_with_fallback(
         self,
@@ -165,13 +176,13 @@ class LLMProviderManager:
         paper_id: int,
     ) -> tuple[LLMResponse, dict]:
         """
-        Call LLM with automatic fallback from Groq to Gemini.
+        Call LLM with automatic fallback: Groq → Gemini → OpenRouter.
 
         Returns:
             tuple of (LLMResponse, metadata_dict)
 
         Raises:
-            LLMError: If both providers fail
+            LLMError: If all providers fail
         """
         metadata = {
             "original_provider": None,
@@ -179,6 +190,7 @@ class LLMProviderManager:
             "fallback_used": False,
             "retry_count": 0,
             "errors": [],
+            "provider_attempts": [],
         }
 
         # Try primary provider (Groq) first
@@ -189,6 +201,7 @@ class LLMProviderManager:
             metadata["original_provider"] = "groq"
             metadata["retry_count"] = meta["retry_count"]
             metadata["errors"] = meta["errors"]
+            metadata["provider_attempts"].append({"provider": "groq", "result": "success" if response else "failed"})
 
             if response is not None:
                 metadata["final_provider"] = "groq"
@@ -199,28 +212,51 @@ class LLMProviderManager:
             if last_error and self._should_fallback(last_error):
                 self._emit_quota_event("groq", last_error, paper_id)
             else:
-                # Don't fallback for permanent errors
                 raise last_error
 
         # Fallback to Gemini
-        if self.gemini.is_configured:
+        if self.gemini.is_configured and _provider_status["gemini"].is_available:
             metadata["fallback_used"] = True
             response, meta = self._try_provider(
                 self.gemini, system_prompt, user_prompt, paper_id
             )
-            metadata["final_provider"] = "gemini"
             metadata["retry_count"] += meta["retry_count"]
             metadata["errors"].extend(meta["errors"])
+            metadata["provider_attempts"].append({"provider": "gemini", "result": "success" if response else "failed"})
 
             if response is not None:
+                metadata["final_provider"] = "gemini"
                 return response, metadata
 
-            # Both providers failed
-            raise meta.get("last_error", LLMError("Both providers failed", provider="both"))
+            # Gemini failed - check if we should fallback to OpenRouter
+            last_error = meta.get("last_error")
+            if last_error and self._should_fallback(last_error):
+                self._emit_quota_event("gemini", last_error, paper_id)
+            else:
+                raise last_error
+
+        # Fallback to OpenRouter (3rd)
+        if self.openrouter.is_configured and _provider_status["openrouter"].is_available:
+            metadata["fallback_used"] = True
+            response, meta = self._try_provider(
+                self.openrouter, system_prompt, user_prompt, paper_id
+            )
+            metadata["retry_count"] += meta["retry_count"]
+            metadata["errors"].extend(meta["errors"])
+            metadata["provider_attempts"].append({"provider": "openrouter", "result": "success" if response else "failed"})
+
+            if response is not None:
+                metadata["final_provider"] = "openrouter"
+                return response, metadata
+
+            # All three providers failed
+            last_error = meta.get("last_error")
+            self._emit_quota_event("openrouter", last_error, paper_id)
+            raise last_error
 
         # No fallback available
         raise LLMError(
-            "Groq failed and Gemini is not configured",
+            "All configured providers failed or are unavailable",
             provider="manager",
         )
 
