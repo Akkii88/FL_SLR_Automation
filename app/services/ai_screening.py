@@ -176,30 +176,65 @@ OUTPUT FORMAT (valid JSON only):
         return "\n".join(parts)
 
     def _parse_llm_response(self, content: str) -> Optional[dict]:
-        """Parse and validate LLM JSON response."""
+        """Parse and validate LLM JSON response. Handles Markdown fences and extra text."""
+        if not content:
+            return None
+
+        # Strip whitespace
+        content = content.strip()
+
+        # Handle Markdown code fences (```json ... ``` or ``` ... ```)
+        if content.startswith("```"):
+            # Remove opening fence
+            lines = content.split("\n")
+            # Skip first line (```json or ```)
+            lines = lines[1:]
+            # Remove closing fence if present
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = "\n".join(lines).strip()
+
+        # Try to find JSON object in the response (handles extra text before/after)
+        if not content.startswith("{"):
+            # Find the first { and last }
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                content = content[start:end + 1]
+            else:
+                logger.error(f"No JSON object found in LLM response: {content[:200]}")
+                return None
+
         try:
             data = json.loads(content)
 
             # Validate required fields
             for field in ["q1_fl_comparison", "q2_non_iid", "q3_superiority_claim", "q4_info_available"]:
-                val = data.get(field, "").upper()
+                val = str(data.get(field, "")).upper()
                 if val not in ("YES", "NO", "UNCLEAR"):
                     data[field] = "UNCLEAR"
 
             # Validate recommendation
-            rec = data.get("recommendation", "").lower()
+            rec = str(data.get("recommendation", "")).lower()
             if rec not in ("likely_include", "likely_exclude", "unclear"):
                 data["recommendation"] = "unclear"
 
             # Validate confidence
-            conf = data.get("confidence", "").lower()
+            conf = str(data.get("confidence", "")).lower()
             if conf not in ("high", "medium", "low"):
                 data["confidence"] = "medium"
 
+            # Ensure evidence fields are strings
+            for ev_field in ["q1_evidence", "q2_evidence", "q3_evidence", "q4_evidence", "reasoning"]:
+                if ev_field not in data or data[ev_field] is None:
+                    data[ev_field] = ""
+                else:
+                    data[ev_field] = str(data[ev_field])
+
             return data
 
-        except json.JSONDecodeError:
-            logger.error(f"LLM returned invalid JSON: {content[:200]}")
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parse error: {e}. Content: {content[:300]}")
             return None
 
     def screen_paper(self, paper_id: int, use_cache: bool = True) -> AIScreeningResult:

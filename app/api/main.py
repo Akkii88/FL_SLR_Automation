@@ -5,10 +5,11 @@ FastAPI application entry point.
 """
 
 import logging
+import traceback
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.config import settings
 from app.api.routes import search, papers, screening, config, dashboard, provenance, export, deduplication, pdf, extraction, evidence, prisma, llm, ai_screening
@@ -36,6 +37,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler: ensures ALL errors return JSON, never HTML
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Return JSON for all unhandled exceptions."""
+    logger = logging.getLogger(__name__)
+    logger.error(f"Unhandled exception: {exc}\n{traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": True,
+            "message": str(exc),
+            "details": traceback.format_exc() if settings.app_env == "development" else None,
+        },
+    )
+
 
 # Include routers
 app.include_router(config.router, prefix="/api/config", tags=["Configuration"])

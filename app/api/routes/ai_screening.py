@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, not_, exists
 
 from app.db.engine import get_db
 from app.models.paper import Paper
