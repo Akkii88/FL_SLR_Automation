@@ -224,15 +224,23 @@ class RankingStabilityEngine:
         """
         Get overall evidence quality statistics across all claims.
         For the main dashboard.
+
+        IMPORTANT: All counts use DISTINCT claim IDs to avoid
+        double-counting when multiple EQ records exist for the same claim
+        (e.g., historical assessments).
         """
         total_claims = self.db.query(func.count(Claim.id)).scalar()
-        assessed_claims = self.db.query(func.count(EvidenceQuality.id)).scalar()
 
-        # Dimension 1: Repetition
+        # Count DISTINCT claims with at least one EQ assessment
+        assessed_claims = self.db.query(
+            func.count(func.distinct(EvidenceQuality.claim_id))
+        ).scalar()
+
+        # Dimension 1: Repetition (distinct claims)
         runs_distribution = (
             self.db.query(
                 EvidenceQuality.independent_runs,
-                func.count(EvidenceQuality.id),
+                func.count(func.distinct(EvidenceQuality.claim_id)),
             )
             .filter(EvidenceQuality.independent_runs.isnot(None))
             .group_by(EvidenceQuality.independent_runs)
@@ -240,48 +248,56 @@ class RankingStabilityEngine:
             .all()
         )
 
-        # Dimension 2: Uncertainty
+        # Dimension 2: Uncertainty (distinct claims)
         uncertainty_dist = (
             self.db.query(
                 EvidenceQuality.uncertainty_reporting,
-                func.count(EvidenceQuality.id),
+                func.count(func.distinct(EvidenceQuality.claim_id)),
             )
             .group_by(EvidenceQuality.uncertainty_reporting)
             .all()
         )
 
-        # Dimension 3: Direct statistics
-        direct_stats_count = self.db.query(func.count(EvidenceQuality.id)).filter(
+        # Dimension 3: Direct statistics (distinct claims)
+        direct_stats_count = self.db.query(
+            func.count(func.distinct(EvidenceQuality.claim_id))
+        ).filter(
             EvidenceQuality.direct_statistical_test == True
         ).scalar()
-        mechanism_only_count = self.db.query(func.count(EvidenceQuality.id)).filter(
+        mechanism_only_count = self.db.query(
+            func.count(func.distinct(EvidenceQuality.claim_id))
+        ).filter(
             EvidenceQuality.mechanism_level_statistical_test == True,
             EvidenceQuality.direct_statistical_test == False,
         ).scalar()
 
-        # Dimension 4: Fairness
-        matched_partition_count = self.db.query(func.count(EvidenceQuality.id)).filter(
+        # Dimension 4: Fairness (distinct claims)
+        matched_partition_count = self.db.query(
+            func.count(func.distinct(EvidenceQuality.claim_id))
+        ).filter(
             EvidenceQuality.matched_client_partition == "YES"
         ).scalar()
-        tuned_baselines_count = self.db.query(func.count(EvidenceQuality.id)).filter(
+        tuned_baselines_count = self.db.query(
+            func.count(func.distinct(EvidenceQuality.claim_id))
+        ).filter(
             EvidenceQuality.hyperparameter_tuning_fairness == "matched/tuned_baselines"
         ).scalar()
 
-        # Dimension 5: Ranking robustness
+        # Dimension 5: Ranking robustness (distinct claims)
         ranking_dist = (
             self.db.query(
                 EvidenceQuality.ranking_robustness,
-                func.count(EvidenceQuality.id),
+                func.count(func.distinct(EvidenceQuality.claim_id)),
             )
             .group_by(EvidenceQuality.ranking_robustness)
             .all()
         )
 
-        # Author claim vs evidence
+        # Author claim vs evidence (distinct claims)
         claim_vs_evidence_dist = (
             self.db.query(
                 EvidenceQuality.author_claim_vs_evidence,
-                func.count(EvidenceQuality.id),
+                func.count(func.distinct(EvidenceQuality.claim_id)),
             )
             .group_by(EvidenceQuality.author_claim_vs_evidence)
             .all()
