@@ -444,7 +444,10 @@
                         <td>${p.publication_year || ''}</td>
                         <td>${p.source || ''}</td>
                         <td><span class="badge badge-${statusColor(p.screening_status)}">${p.screening_status}</span></td>
-                        <td><button class="btn" style="padding:4px 8px;font-size:0.75rem;" onclick="viewPaper(${p.id})">View</button></td>
+                        <td>
+                            <button class="btn" style="padding:4px 8px;font-size:0.75rem;" onclick="viewPaper(${p.id})">View</button>
+                            <button class="btn btn-secondary" style="padding:4px 8px;font-size:0.75rem;" onclick="showPaperSources(${p.id})">Sources</button>
+                        </td>
                     </tr>
                 `).join('');
                 // Pagination
@@ -502,6 +505,34 @@
 
         function closeModal() {
             document.getElementById('paperModal').classList.remove('active');
+        }
+
+        async function showPaperSources(paperId) {
+            try {
+                const data = await apiJSON('/api/papers/' + paperId + '/sources');
+                const content = document.getElementById('paperModalContent');
+
+                let linksHtml = '';
+                if (data.links && data.links.length > 0) {
+                    linksHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">' +
+                        data.links.map(l => '<a href="' + l.url + '" target="_blank" rel="noopener" class="btn" style="text-decoration:none;">' + l.label + '</a>').join('') +
+                        '</div>';
+                } else {
+                    linksHtml = '<p style="color:#999;">No accessible source link currently available.</p>';
+                }
+
+                content.innerHTML = `
+                    <h3>${data.title}</h3>
+                    <p><strong>Authors:</strong> ${(data.authors || []).join(', ')}</p>
+                    <p><strong>Year:</strong> ${data.year || 'Not reported'} | <strong>Venue:</strong> ${data.venue || 'Not reported'}</p>
+                    <p><strong>DOI:</strong> ${data.doi ? '<a href="https://doi.org/' + data.doi + '" target="_blank">' + data.doi + '</a>' : 'Not available'}</p>
+                    <p><strong>Open Access:</strong> ${data.is_open_access ? 'Yes (' + (data.oa_status || '') + ')' : 'No'}</p>
+                    <hr>
+                    <h4>Source Links</h4>
+                    ${linksHtml}
+                `;
+                document.getElementById('paperModal').classList.add('active');
+            } catch(e) { toast('Error loading sources: ' + e.message, 'error'); }
         }
 
         async function quickScreen(id, decision) {

@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.config import settings
-from app.api.routes import search, papers, screening, config, dashboard, provenance, export, deduplication, pdf, extraction, evidence, prisma, llm, ai_screening
+from app.api.routes import search, papers, screening, config, dashboard, provenance, export, deduplication, pdf, extraction, evidence, prisma, llm, ai_screening, paper_sources
 
 # Configure logging
 logging.basicConfig(
@@ -69,6 +69,7 @@ app.include_router(evidence.router, prefix="/api/evidence", tags=["Evidence"])
 app.include_router(prisma.router, prefix="/api/prisma", tags=["PRISMA"])
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
 app.include_router(ai_screening.router, prefix="/api/ai-screening", tags=["AI Screening"])
+app.include_router(paper_sources.router, prefix="/api/papers", tags=["Paper Sources"])
 
 
 @app.get("/")
